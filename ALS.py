@@ -124,11 +124,13 @@ class KineticModel:
 		df_cov_p = pd.DataFrame(cov_p, index=p_names, columns=p_names)
 		df_corr_p = pd.DataFrame(corr_p, index=p_names, columns=p_names)
 
-
 		# Display results
 		print('Optimization terminated successfully.' if ier in (1,2,3,4) else 'Optimization FAILED.')
 		print('Exit Code = {:d}'.format(ier))
 		print('Exit Messages = {}'.format(mesg))
+		print()
+
+		print('Optimized Cost Function Value = {:g}'.format(cost))
 		print()
 
 		print('Optimized Parameters and Standard Errors:')
