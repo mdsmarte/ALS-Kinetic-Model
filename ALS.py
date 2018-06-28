@@ -18,8 +18,7 @@ class KineticModel:
 		self._user_model = user_model
 		# Add code to verify the structure of the model agrees with formatting requirements
 
-
-	def fit(self, t, tbin, data, model_params, ALS_params, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1, plot_fits=True):#, save=False, filename=''):
+	def fit(self, t, tbin, data, model_params, ALS_params, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1, plot_fits=True):#, save=False, filename=None):
 		'''
 		Input:   time axis, species data, params - initial guesses as well as fixed paremters, flags for using IRF and photolysis gradient,
 		         flags for printing the output and plotting the fits, full output or abbreviated output
@@ -33,11 +32,14 @@ class KineticModel:
 		# Make sure there are no zeros in the error arrays (will lead to divide by zero errors)
 		# Be sure to have comments on how weighting works
 		# Add code to verify the structure of the data and params agrees with formatting requirements - should checks of model_params and ALS_params be functions?
+		if ALS_params.at['t0','fit'] and not fit_pre_photo:
+			# Throw error - if t0 is being fit then, fit_pre_photo must be True
+			pass
 
 		# Determine start time, end time, and range of times over which to fit
 		t_start = t.min()
 		t_end = t.max()
-		idx_data = np.full(t.shape, True) if fit_pre_photo else (t >= t0)	# Boolean array
+		idx_data = np.full(t.shape, True) if fit_pre_photo else (t >= ALS_params.at['t0','val'])	# Boolean array
 
 		# Organize fitted species data into data_val and data_err frames
 		# Columns of data_val and data_err are species and the rows correspond to times in t array
@@ -93,7 +95,7 @@ class KineticModel:
 			return np.concatenate(res)
 
 		# Perform the fit
-		# NOTE: The backend of leastsq will automatically autoscale the fit parameters to the same order of magnitude if diag=None.
+		# NOTE: The backend of leastsq will automatically autoscale the fit parameters to the same order of magnitude if diag=None (default).
 		p, cov_p, infodict, mesg, ier = leastsq(calc_cost, p0, full_output=1)
 
 		# Calculate minimized cost value
@@ -127,7 +129,7 @@ class KineticModel:
 		# Display results
 		print('Optimization terminated successfully.' if ier in (1,2,3,4) else 'Optimization FAILED.')
 		print('Exit Code = {:d}'.format(ier))
-		print('Exit Messages = {}'.format(mesg))
+		print('Exit Message = {}'.format(mesg))
 		print()
 
 		print('Optimized Cost Function Value = {:g}'.format(cost))
@@ -195,7 +197,7 @@ class KineticModel:
 		pass
 
 	def _time_axis(self, t_start, t_end, tbin):
-		return np.linspace(t_start, t_end, num=int(((t_end-t_start)/(tbin*_dt))+1), endpoint=True)
+		return np.linspace(t_start, t_end, num=int(((t_end-t_start)/(tbin*self._dt))+1), endpoint=True)
 
 	def _model(self, t_start, t_end, tbin, model_params, ALS_params, apply_IRF, apply_PG, t_PG):
 		# model_params and ALS_params are now dictionaries
@@ -217,11 +219,11 @@ class KineticModel:
 		# Create time axis for running the model (before applying tbin and t0)
 		t0 = ALS_params['t0']
 		if t0 == 0:
-			t = self._time_axis(-20, t_end+((tbin-1)*_dt), 1)
+			t = self._time_axis(-20, t_end+((tbin-1)*self._dt), 1)
 		elif t0 < 0:
-			t = self._time_axis(-20, t_end+((tbin-1)*_dt)-t0, 1)
+			t = self._time_axis(-20, t_end+((tbin-1)*self._dt)-t0, 1)
 		elif t0 > 0:
-			t = self._time_axis(-20-t0, t_end+((tbin-1)*_dt), 1)
+			t = self._time_axis(-20-t0, t_end+((tbin-1)*self._dt), 1)
 		
 		# Model integration w/ photolysis gradient
 		if apply_PG:
@@ -235,11 +237,11 @@ class KineticModel:
 
 			# Then populate concentration matrix for t >= 0
 			idx_curr = idx_zero
-			idx_step = int(t_PG/_dt)
+			idx_step = int(t_PG/self._dt)
 
 			while idx_curr < t.size:
 				t_mid = t[idx_curr] + t_PG/2
-				X_curr = X_0*(1+B*t_mid)
+				X_curr = X0*(1+B*t_mid)
 
 				model_params_curr = model_params.copy()
 				model_params_curr['X0'] = X_curr
@@ -257,14 +259,14 @@ class KineticModel:
 
 		# Convolve with IRF
 		if apply_IRF:
-			c = self._conv_IRF(m, c, t.size, A)
+			c = self._conv_IRF(m, c, t.size, ALS_params['A'])
 
 		# Apply photolysis offset (the sign of this is correct)
 		t = t + t0
 
 		# Trim data to desired range
 		idx_start = (np.abs(t - t_start)).argmin()
-		idx_end   = (np.abs(t - (t_end+((tbin-1)*dt)))).argmin()
+		idx_end   = (np.abs(t - (t_end+((tbin-1)*self._dt)))).argmin()
 
 		t = t[idx_start:idx_end+1]
 		for species in c:
@@ -284,7 +286,7 @@ class KineticModel:
 		# Columns of dataframe are species, rows correspond to times in t_out
 		return t_out, pd.DataFrame.from_dict(c_out)
 
-	def _conv_IRF(m, y, N, A):
+	def _conv_IRF(self, m, y, N, A):
 		'''
 		Convolves signals with the mass-dependent ALS instrument response function.
 
@@ -311,7 +313,7 @@ class KineticModel:
 		'''
 
 		# Define convolution functions (h)
-		t = np.arange(N)*_dt
+		t = np.arange(N)*self._dt
 		h = {}
 		for species in m:
 			h[species] = np.zeros(N)
