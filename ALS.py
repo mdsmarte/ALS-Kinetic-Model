@@ -1,3 +1,9 @@
+# Author: Matthew Smarte
+# Version:
+# Date:
+
+# List of dependencies
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import leastsq
@@ -112,14 +118,15 @@ class KineticModel:
 				N = p.size
 				cov_p *= cost / (M-N)
 
+			# Compute standard errors
+			p_err = np.sqrt(np.diag(cov_p))
+
 			# Compute correlation matrix
 			corr_p = np.array([[cov_p[i][j] / (np.sqrt(cov_p[i][i]*cov_p[j][j])) for j in range(cov_p.shape[1])] for i in range(cov_p.shape[0])])
 
 		else:
+			p_err = np.full(p.shape, np.NaN)
 			corr_p = None
-
-		# Compute standard errors
-		p_err = np.sqrt(np.diag(cov_p))
 
 		# Convert fit results to dataframes
 		df_p = pd.DataFrame(np.array((p,p_err)).T, index=p_names, columns=('val','err'))
@@ -150,28 +157,77 @@ class KineticModel:
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
 
-	# Below fcn more like plot model with data, not really doing a fit - how to rename?
-	def plot_fit(self):
+	# Should we add save functionality to this? Save the scaled model output
+	# Is plot_fit the correct name?
+	def plot_fit(self, t, tbin, data, model_params, ALS_params, apply_IRF=True, apply_PG=True, t_PG=1):
 		'''
 		Plots the model overlaid on the inputted species data with residuals
-		Used by self.fit?
+		Only plots species for which fit=True in the data dataframe
 		'''
-		pass
+
+		# Need to handle the case where nSpecies is < 3
+
+		# Run the model
+		t_start = t.min()
+		t_end = t.max()
+		t_model, c_model = self.run(t_start, t_end, tbin, model_params, ALS_params, apply_IRF, apply_PG, t_PG)
+
+		# Only plot the species for which fit=True
+		# Columns of data_val are species and the rows correspond to times in t array
+		data_fit = data[data['fit']]
+		species_names = list(data_fit.index)
+		nSpecies = len(species_names)
+		data_val = pd.DataFrame(list(data_fit['val']), index=species_names).T
+
+		f, ax = plt.subplots(2, nSpecies, gridspec_kw={'height_ratios':[3, 1]})
+		if nSpecies == 1:
+			ax = ax.reshape((2,1))
+
+		'''
+		plt.rcParams['font.family'] = 'serif'
+		plt.rcParams['font.serif'] = 'Ubuntu'
+		plt.rcParams['font.monospace'] = 'Ubuntu Mono'
+		plt.rcParams['font.size'] = 10
+		plt.rcParams['axes.labelsize'] = 10
+		plt.rcParams['axes.labelweight'] = 'bold'
+		plt.rcParams['xtick.labelsize'] = 8
+		plt.rcParams['ytick.labelsize'] = 8
+		plt.rcParams['legend.fontsize'] = 10
+		plt.rcParams['figure.titlesize'] = 12
+		'''
+
+		for i, species in enumerate(species_names):
+			fit = ALS_params.loc['S_'+species,'val']*c_model[species]
+
+			ax[0,i].set_title(species)					# Make the title the species name
+			ax[0,i].plot(t, data_val[species], 'o')		# Plot the data
+			ax[0,i].plot(t, fit, linewidth=2.) 			# Plot the fit
+			ax[1,i].plot(t, data_val[species]-fit, 'o')	# Plot residual
+			ax[1,i].plot(t, np.zeros(t.shape))			# Plot zero residual line
+
+		ax[0,0].set_ylabel('Data & Fit')
+		ax[1,0].set_ylabel('Data - Fit')
+		#ax[1,1].set_xlabel('Time (ms)')
+
+
+		plt.show()
+
 
 	def run(self, t_start, t_end, tbin, model_params, ALS_params, apply_IRF=True, apply_PG=True, t_PG=1): #, plot_results=True, save=False, filename=''):
 		'''
 		# Inputs:  time axis, params - all fixed, species for which we want output, flags for plotting
 		# Returns: concentrations as a function of time for each of the species
-		# Only uses 'val' column
-		'''
+		# Only uses 'val' column of parameters
 
 		# t_start and t_end need to be integer multiples of dt*tbin and t_PG
+		'''
 
-		#t, c = self._model(t_start, t_end, tbin)
+		model_params_val = model_params['val'].to_dict()
+		ALS_params_val = ALS_params['val'].to_dict()
 
-		#t_start, t_end?  or full t axis
-		#model_params, ALS_params, tbin=10, apply_IRF=True, apply_PG=True, t_PG=1
-		pass
+		t_model, c_model = self._model(t_start, t_end, tbin, model_params_val, ALS_params_val, apply_IRF, apply_PG, t_PG)
+
+		return t_model, c_model
 
 	def plot_model(self):
 		'''
