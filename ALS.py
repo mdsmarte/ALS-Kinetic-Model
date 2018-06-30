@@ -152,7 +152,16 @@ class KineticModel:
 
 		# Plot the fits
 		if plot_fits:
-			pass
+			model_params_p = model_params.copy()
+			ALS_params_p = ALS_params.copy()
+
+			for param in df_p.index:
+				if param in model_params_p.index:
+					model_params_p.at[param,'val'] = df_p.at[param,'val']
+				else:
+					ALS_params_p.at[param,'val'] = df_p.at[param,'val']
+
+			self.plot_fit(t, tbin, data, model_params_p, ALS_params_p, apply_IRF, apply_PG, t_PG)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
@@ -179,36 +188,40 @@ class KineticModel:
 		nSpecies = len(species_names)
 		data_val = pd.DataFrame(list(data_fit['val']), index=species_names).T
 
-		f, ax = plt.subplots(2, nSpecies, gridspec_kw={'height_ratios':[3, 1]})
+		dpi = 120
+		f, ax = plt.subplots(2, nSpecies, gridspec_kw={'height_ratios':[3, 1]}, figsize=(900/dpi,450/dpi), dpi=dpi)
+		f.tight_layout()
+
+		# Determine x axis ticks
+		delta_tick = 20
+		tick_low = (t_start//delta_tick)*delta_tick
+		tick_high = t_end if t_end % delta_tick == 0. else ((t_end//delta_tick)+1)*delta_tick
+		ticks = np.linspace(tick_low, tick_high, num=round(((tick_high-tick_low)/delta_tick)+1), endpoint=True)
+
+		# If we are only plotting one species then we need to change ax array --> matrix
 		if nSpecies == 1:
 			ax = ax.reshape((2,1))
 
-		'''
-		plt.rcParams['font.family'] = 'serif'
-		plt.rcParams['font.serif'] = 'Ubuntu'
-		plt.rcParams['font.monospace'] = 'Ubuntu Mono'
-		plt.rcParams['font.size'] = 10
-		plt.rcParams['axes.labelsize'] = 10
-		plt.rcParams['axes.labelweight'] = 'bold'
-		plt.rcParams['xtick.labelsize'] = 8
-		plt.rcParams['ytick.labelsize'] = 8
-		plt.rcParams['legend.fontsize'] = 10
-		plt.rcParams['figure.titlesize'] = 12
-		'''
-
+		#cost = 0
 		for i, species in enumerate(species_names):
 			fit = ALS_params.loc['S_'+species,'val']*c_model[species]
 
-			ax[0,i].set_title(species)					# Make the title the species name
-			ax[0,i].plot(t, data_val[species], 'o')		# Plot the data
-			ax[0,i].plot(t, fit, linewidth=2.) 			# Plot the fit
-			ax[1,i].plot(t, data_val[species]-fit, 'o')	# Plot residual
-			ax[1,i].plot(t, np.zeros(t.shape))			# Plot zero residual line
+			ax[0,i].set_title(species, fontweight='bold')	# Make the title the species name
+			ax[0,i].plot(t, data_val[species], 'o')			# Plot the data
+			ax[0,i].plot(t, fit, linewidth=2.) 				# Plot the fit
+			ax[1,i].plot(t, data_val[species]-fit, 'o')		# Plot residual
+			ax[1,i].plot(t, np.zeros(t.shape))				# Plot zero residual line
+
+			ax[0,i].set_xticks(ticks)
+			ax[1,i].set_xticks(ticks)
+
+			#cost += ((data_val[species]-fit)**2).sum() # cost (no error)
 
 		ax[0,0].set_ylabel('Data & Fit')
 		ax[1,0].set_ylabel('Data - Fit')
 		#ax[1,1].set_xlabel('Time (ms)')
 
+		#print('Cost Function Value: {:g}'.format(cost))
 
 		plt.show()
 
@@ -253,7 +266,7 @@ class KineticModel:
 		pass
 
 	def _time_axis(self, t_start, t_end, tbin):
-		return np.linspace(t_start, t_end, num=int(((t_end-t_start)/(tbin*self._dt))+1), endpoint=True)
+		return np.linspace(t_start, t_end, num=round(((t_end-t_start)/(tbin*self._dt))+1), endpoint=True)
 
 	def _model(self, t_start, t_end, tbin, model_params, ALS_params, apply_IRF, apply_PG, t_PG):
 		# model_params and ALS_params are now dictionaries
@@ -293,7 +306,7 @@ class KineticModel:
 
 			# Then populate concentration matrix for t >= 0
 			idx_curr = idx_zero
-			idx_step = int(t_PG/self._dt)
+			idx_step = round(t_PG/self._dt)
 
 			while idx_curr < t.size:
 				t_mid = t[idx_curr] + t_PG/2
