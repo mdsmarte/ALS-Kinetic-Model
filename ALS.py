@@ -109,14 +109,12 @@ class KineticModel:
 
 		# Prepare covariance and correlation matrices
 		if cov_p is not None:
-			# NEED TO REVIST THE LOGIC OF THIS NOW THAT WE HAVE ADDED SPECIES WEIGHTING FUNCTIONALITY
 
-			# If cost function is not error weighted, then scale the covariance matrix according to documentation for leastsq and source code for curve_fit.
-			# Scale factor is cost / (# of data points - # fit parameters)
-			if not err_weight:
-				M = infodict['fvec'].size
-				N = p.size
-				cov_p *= cost / (M-N)
+			# Scale the covariance matrix according to documentation for leastsq and source code for curve_fit.
+			# Scale factor is cost / (# of data points - # fit parameters).
+			M = infodict['fvec'].size
+			N = p.size
+			cov_p *= cost / (M-N)
 
 			# Compute standard errors
 			p_err = np.sqrt(np.diag(cov_p))
@@ -190,7 +188,7 @@ class KineticModel:
 
 		dpi = 120
 		f, ax = plt.subplots(2, nSpecies)#, gridspec_kw={'height_ratios':[3, 1]}, figsize=(900/dpi,450/dpi), dpi=dpi)
-		f.tight_layout()
+		#f.tight_layout()
 
 		# Determine x axis ticks
 		delta_tick = 20
