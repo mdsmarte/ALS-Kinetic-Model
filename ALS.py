@@ -24,7 +24,7 @@ class KineticModel:
 		self._user_model = user_model
 		# Add code to verify the structure of the model agrees with formatting requirements
 
-	def fit(self, t, tbin, data, model_params, ALS_params, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1, plot_fits=True):#, save=False, filename=None):
+	def fit(self, t, tbin, data, model_params, ALS_params, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1, plot_fits=True, **kwargs):#, save=False, filename=None):
 		'''
 		Input:   time axis, species data, params - initial guesses as well as fixed paremters, flags for using IRF and photolysis gradient,
 		         flags for printing the output and plotting the fits, full output or abbreviated output
@@ -102,7 +102,7 @@ class KineticModel:
 
 		# Perform the fit
 		# NOTE: The backend of leastsq will automatically autoscale the fit parameters to the same order of magnitude if diag=None (default).
-		p, cov_p, infodict, mesg, ier = leastsq(calc_cost, p0, full_output=1)
+		p, cov_p, infodict, mesg, ier = leastsq(calc_cost, p0, full_output=1, **kwargs)
 
 		# Calculate minimized cost value
 		cost = np.sum(infodict['fvec']**2)
@@ -189,7 +189,7 @@ class KineticModel:
 		data_val = pd.DataFrame(list(data_fit['val']), index=species_names).T
 
 		dpi = 120
-		f, ax = plt.subplots(2, nSpecies, gridspec_kw={'height_ratios':[3, 1]}, figsize=(900/dpi,450/dpi), dpi=dpi)
+		f, ax = plt.subplots(2, nSpecies)#, gridspec_kw={'height_ratios':[3, 1]}, figsize=(900/dpi,450/dpi), dpi=dpi)
 		f.tight_layout()
 
 		# Determine x axis ticks
@@ -202,7 +202,7 @@ class KineticModel:
 		if nSpecies == 1:
 			ax = ax.reshape((2,1))
 
-		#cost = 0
+		cost = 0
 		for i, species in enumerate(species_names):
 			fit = ALS_params.loc['S_'+species,'val']*c_model[species]
 
@@ -215,13 +215,14 @@ class KineticModel:
 			ax[0,i].set_xticks(ticks)
 			ax[1,i].set_xticks(ticks)
 
-			#cost += ((data_val[species]-fit)**2).sum() # cost (no error)
+			cost += ((data_val[species]-fit)**2).sum() # cost (no error)
+			# Give fit pre_photo_false and not pre_photo_false values
 
 		ax[0,0].set_ylabel('Data & Fit')
 		ax[1,0].set_ylabel('Data - Fit')
 		#ax[1,1].set_xlabel('Time (ms)')
 
-		#print('Cost Function Value: {:g}'.format(cost))
+		print('Cost Function Value: {:g}'.format(cost))
 
 		plt.show()
 
