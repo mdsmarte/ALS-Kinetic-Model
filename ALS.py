@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import leastsq
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from IPython.display import display
 
 # TODO:
@@ -24,7 +25,7 @@ class KineticModel:
 		self._user_model = user_model
 		# Add code to verify the structure of the model agrees with formatting requirements
 
-	def fit(self, t, tbin, data, model_params, ALS_params, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1, plot_fits=True, **kwargs):#, save=False, filename=None):
+	def fit(self, t, tbin, data, model_params, ALS_params, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1, delta_xtick=20, save_fn=None, **kwargs):#, save=False, filename=None):
 		'''
 		Input:   time axis, species data, params - initial guesses as well as fixed paremters, flags for using IRF and photolysis gradient,
 		         flags for printing the output and plotting the fits, full output or abbreviated output
@@ -102,8 +103,7 @@ class KineticModel:
 
 		# Perform the fit
 		# NOTE: The backend of leastsq will automatically autoscale the fit parameters to the same order of magnitude if diag=None (default).
-		p, cov_p, infodict, mesg, ier = leastsq(calc_cost, p0, full_output=1, **kwargs)
-
+		p, cov_p, infodict, mesg, ier = leastsq(calc_cost, p0, full_output=True, **kwargs)
 		# Calculate minimized cost value
 		cost = np.sum(infodict['fvec']**2)
 
@@ -149,30 +149,27 @@ class KineticModel:
 		print()
 
 		# Plot the fits
-		if plot_fits:
-			model_params_p = model_params.copy()
-			ALS_params_p = ALS_params.copy()
+		model_params_p = model_params.copy()
+		ALS_params_p = ALS_params.copy()
 
-			for param in df_p.index:
-				if param in model_params_p.index:
-					model_params_p.at[param,'val'] = df_p.at[param,'val']
-				else:
-					ALS_params_p.at[param,'val'] = df_p.at[param,'val']
+		for param in df_p.index:
+			if param in model_params_p.index:
+				model_params_p.at[param,'val'] = df_p.at[param,'val']
+			else:
+				ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-			self.plot_fit(t, tbin, data, model_params_p, ALS_params_p, apply_IRF, apply_PG, t_PG)
+		self.plot_data_model(t, tbin, data, model_params_p, ALS_params_p, apply_IRF, apply_PG, t_PG, delta_xtick, save_fn)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
-
-	# Should we add save functionality to this? Save the scaled model output
-	# Is plot_fit the correct name?
-	def plot_fit(self, t, tbin, data, model_params, ALS_params, apply_IRF=True, apply_PG=True, t_PG=1):
+	def plot_data_model(self, t, tbin, data, model_params, ALS_params, apply_IRF=True, apply_PG=True, t_PG=1, delta_xtick=20, save_fn=None):
 		'''
 		Plots the model overlaid on the inputted species data with residuals
 		Only plots species for which fit=True in the data dataframe
 		'''
-
-		# Need to handle the case where nSpecies is < 3
+		# TODO:
+		# Add print cost functionality
+		# Add save functionality
 
 		# Run the model
 		t_start = t.min()
@@ -186,43 +183,56 @@ class KineticModel:
 		nSpecies = len(species_names)
 		data_val = pd.DataFrame(list(data_fit['val']), index=species_names).T
 
+		# Set up the grid of subplots
+		nrows = round(nSpecies/3) if (nSpecies%3) == 0 else round((nSpecies//3)+1)
+		ncols = 3
 		dpi = 120
-		f, ax = plt.subplots(2, nSpecies)#, gridspec_kw={'height_ratios':[3, 1]}, figsize=(900/dpi,450/dpi), dpi=dpi)
-		#f.tight_layout()
 
-		# Determine x axis ticks
-		delta_tick = 20
-		tick_low = (t_start//delta_tick)*delta_tick
-		tick_high = t_end if t_end % delta_tick == 0. else ((t_end//delta_tick)+1)*delta_tick
-		ticks = np.linspace(tick_low, tick_high, num=round(((tick_high-tick_low)/delta_tick)+1), endpoint=True)
+		plt.rc('font', size=9)
+		f = plt.figure(figsize=(1000/dpi,450*nrows/dpi), dpi=dpi)
+		gs = gridspec.GridSpec(nrows, ncols, figure=f, hspace=0.3, wspace=0.3, top=0.9)
 
-		# If we are only plotting one species then we need to change ax array --> matrix
-		if nSpecies == 1:
-			ax = ax.reshape((2,1))
+		# Determine x-axis ticks
+		tick_low = (t_start//delta_xtick)*delta_xtick
+		tick_high = t_end if t_end % delta_xtick == 0. else ((t_end//delta_xtick)+1)*delta_xtick
+		ticks = np.linspace(tick_low, tick_high, num=round(((tick_high-tick_low)/delta_xtick)+1), endpoint=True)
 
-		cost = 0
+		# Make the subplots
+		s_model = []
 		for i, species in enumerate(species_names):
-			fit = ALS_params.loc['S_'+species,'val']*c_model[species]
+			mod = ALS_params.loc['S_'+species,'val']*c_model[species]
+			s_model.append(mod)
 
-			ax[0,i].set_title(species, fontweight='bold')	# Make the title the species name
-			ax[0,i].plot(t, data_val[species], 'o')			# Plot the data
-			ax[0,i].plot(t, fit, linewidth=2.) 				# Plot the fit
-			ax[1,i].plot(t, data_val[species]-fit, 'o')		# Plot residual
-			ax[1,i].plot(t, np.zeros(t.shape))				# Plot zero residual line
+			j = i // 3	# Row index
+			k = i % 3	# Col index
 
-			ax[0,i].set_xticks(ticks)
-			ax[1,i].set_xticks(ticks)
+			gs_jk = gridspec.GridSpecFromSubplotSpec(2, 1, hspace=0, height_ratios=[3,1], subplot_spec=gs[j,k])
+			ax0 = plt.subplot(gs_jk[0])	# Data & Fit
+			ax1 = plt.subplot(gs_jk[1])	# Data - Fit
 
-			cost += ((data_val[species]-fit)**2).sum() # cost (no error)
-			# Give fit pre_photo_false and not pre_photo_false values
+			ax0.plot(t, data_val[species], 'o')			# Plot the data
+			ax0.plot(t_model, mod, linewidth=2)			# Plot the fit
+			ax1.plot(t, data_val[species]-mod, 'o')		# Plot residual
+			ax1.plot(t, np.zeros(t.shape))				# Plot zero residual line
 
-		ax[0,0].set_ylabel('Data & Fit')
-		ax[1,0].set_ylabel('Data - Fit')
-		#ax[1,1].set_xlabel('Time (ms)')
+			# Manually set x-axis ticks
+			ax0.set_xticks(ticks)
+			ax1.set_xticks(ticks)
 
-		print('Cost Function Value: {:g}'.format(cost))
+			# Labels
+			ax0.set_title(species, fontweight='bold')	 # Make the title the species name
+			ax0.set_xticklabels([])						 # Hide x-axis tick labels for top plot
+			ax1.set_xlabel('Time (ms)')					 # Set x-axis label for bottom plot
+			if k == 0:									 # Set y-axis labels if plot is in first column
+				ax0.set_ylabel('Data & Fit')
+				ax1.set_ylabel('Data - Fit')
 
 		plt.show()
+
+		if save_fn:
+			df = pd.DataFrame(s_model).T
+			df.insert(0,'t',t_model)
+			df.to_csv(save_fn, index=False)
 
 
 	def run(self, t_start, t_end, tbin, model_params, ALS_params, apply_IRF=True, apply_PG=True, t_PG=1): #, plot_results=True, save=False, filename=''):
@@ -249,17 +259,19 @@ class KineticModel:
 	
 	def bootstrap(self):
 		'''
-		If fit_pre_photo is True then 
+		If fit_pre_photo is True then only sample from t >= t0
 		'''
 		# Be sure to make a copy of the data frame so it doesn't get overwritten
 
 		pass
 
-	def monte_carlo(self):
+	def monte_carlo_params(self):
 		'''
 		Need to make sure parameters don't become nonphysical (e.g. negative rate constants) when simulating
 		'''
 		# Be sure to make a copy of the params data frames so that they don't get overwritten
+		# When throwing our unrealistic parameters during Monte Carlo sampling, force the distributions to still be symmetric and renormalize
+
 
 
 		pass

@@ -13,6 +13,7 @@ def calc_k_ter(k0_300, n, kinf_300, m, T, M):
 	k_for = (k0*M/(1+k0*M/kinf))*0.6**((1+(np.log10(k0*M/kinf))**2)**(-1))
 	return k_for
 
+# Define the user model
 def model_H2O2_depletion(t, model_params):
 	# First argument is a numpy array of times (ms)
 	# Second argument is a dictionary of model parameters
