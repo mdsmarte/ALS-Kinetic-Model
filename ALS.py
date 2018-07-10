@@ -1,8 +1,22 @@
 # Author: Matthew Smarte
-# Version:
-# Date:
+# Version: 1.0.0
+# Date: 7/10/18
 
-# List of dependencies
+# This code is designed to be imported and run inside a Jupyter notebook using an iPython kernel.
+
+'''
+DEPENDENCIES
+
+This code was developed and tested using the following packages/versions.
+Other versions may also work.
+
+python 		3.6.1
+numpy 		1.12.1
+pandas 		0.20.1
+scipy 		0.19.0
+matplotlib 	2.2.2
+ipython 	5.3.0
+'''
 
 import numpy as np
 import pandas as pd
@@ -12,20 +26,23 @@ import matplotlib.gridspec as gridspec
 from IPython.display import display
 
 # TODO:
-# Add checks to make sure the inputs from the user are correct, throw errors if they are not
-# Try to stick to the PEP 8 python style recommendation
-# Add save output options
-# Figure out best way to create tables, plots in the notebook - from IPython.display import display
+# Write bootstrap / monte_carlo_params functions
+# Add checks to make sure the inputs from the user have the correct formatting, throw errors if they are not (ex: err can have no zeros)
+# Check plot_model and plot_data_model for more than 2 rows and generalize to look good for more than 6 species
 
 class KineticModel:
 
 	_dt = 0.02	# Fundamental kinetic time step (ms)
 
-	def __init__(self, user_model):
+	def __init__(self, user_model, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1.0):
 		self._user_model = user_model
-		# Add code to verify the structure of the model agrees with formatting requirements
+		self._err_weight = err_weight
+		self._fit_pre_photo = fit_pre_photo
+		self._apply_IRF = apply_IRF
+		self._apply_PG = apply_PG
+		self._t_PG = t_PG
 
-	def fit(self, t, tbin, data, model_params, ALS_params, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1, delta_xtick=20, save_fn=None, **kwargs):#, save=False, filename=None):
+	def fit(self, t, tbin, data, model_params, ALS_params, delta_xtick=20, save_fn=None, **kwargs):
 		'''
 		Input:   time axis, species data, params - initial guesses as well as fixed paremters, flags for using IRF and photolysis gradient,
 		         flags for printing the output and plotting the fits, full output or abbreviated output
@@ -36,24 +53,25 @@ class KineticModel:
 		the smallest point in t can never be less than -20 ms
 		'''
 		
-		# Make sure there are no zeros in the error arrays (will lead to divide by zero errors)
-		# Be sure to have comments on how weighting works
-		# Add code to verify the structure of the data and params agrees with formatting requirements - should checks of model_params and ALS_params be functions?
-		if ALS_params.at['t0','fit'] and not fit_pre_photo:
-			# Throw error - if t0 is being fit then, fit_pre_photo must be True
-			pass
+		# Check fit t0 / fit_pre_photo
+		if ALS_params.at['t0','fit'] and not self._fit_pre_photo:
+			print('ERROR: Fit t0 is True but fit_pre_photo is False!')
+			print('If we are fitting t0, then we must also fit the pre-photolysis data.')
+			print('Otherwise, the cost function would be minimized by arbitrarily increasing t0.')
+
+			return None, None, None, None, None, None
 
 		# Determine start time, end time, and range of times over which to fit
 		t_start = t.min()
 		t_end = t.max()
-		idx_data = np.full(t.shape, True) if fit_pre_photo else (t >= ALS_params.at['t0','val'])	# Boolean array
+		idx_data = np.full(t.shape, True) if self._fit_pre_photo else (t >= ALS_params.at['t0','val'])	# Boolean array
 
 		# Organize fitted species data into data_val and data_err frames
 		# Columns of data_val and data_err are species and the rows correspond to times in t array
 		data_fit = data[data['fit']]
 		species_names = list(data_fit.index)
 		data_val = pd.DataFrame(list(data_fit['val']), index=species_names).T
-		if err_weight:
+		if self._err_weight:
 			data_err = pd.DataFrame(list(data_fit['err']), index=species_names).T
 
 		# Organize the fit parameters
@@ -64,6 +82,8 @@ class KineticModel:
 
 		# Establish corrspondence between data and model time axes
 		# Each entry in t has an exact match to an entry in t_model
+		# If fit is being called directly, then t and t_model should match exactly and this is technically unnecessary
+		# However, if fit is called from bootstrap, we need to explicitly define the correspondence
 		# We take the below approach (rather than ==) to prevent any problems with numerical roundoff
 		t_model = self._time_axis(t_start, t_end, tbin)
 		idx_model = [np.abs(t_model - t[idx_data][_]).argmin() for _ in range(sum(idx_data))]	# Array of positional indices
@@ -80,7 +100,7 @@ class KineticModel:
 				ALS_params_p[param] = p[p_names.index(param)] if param in p_names else ALS_params.at[param,'val']
 
 			# Run the model - we only need the concentrations dataframe
-			c_model = self._model(t_start, t_end, tbin, model_params_p, ALS_params_p, apply_IRF, apply_PG, t_PG)[1]
+			c_model = self._model(t_start, t_end, tbin, model_params_p, ALS_params_p)[1]
 
 			# Calculate the weighted residual array
 			res = []
@@ -92,7 +112,7 @@ class KineticModel:
 				# We take the sqrt of the weight since leastsq will square the array later
 				species_res = np.sqrt(data_fit.at[species,'weight']) * (obs-mod).values
 
-				if err_weight:
+				if self._err_weight:
 					err = data_err.loc[idx_data, species]
 					species_res = species_res / err.values
 
@@ -105,7 +125,7 @@ class KineticModel:
 		# NOTE: The backend of leastsq will automatically autoscale the fit parameters to the same order of magnitude if diag=None (default).
 		p, cov_p, infodict, mesg, ier = leastsq(calc_cost, p0, full_output=True, **kwargs)
 		# Calculate minimized cost value
-		cost = np.sum(infodict['fvec']**2)
+		cost = (infodict['fvec']**2).sum()
 
 		# Prepare covariance and correlation matrices
 		if cov_p is not None:
@@ -158,30 +178,34 @@ class KineticModel:
 			else:
 				ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-		self.plot_data_model(t, tbin, data, model_params_p, ALS_params_p, apply_IRF, apply_PG, t_PG, delta_xtick, save_fn)
+		self.plot_data_model(t, tbin, data, model_params_p, ALS_params_p, delta_xtick, save_fn, False)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
-	def plot_data_model(self, t, tbin, data, model_params, ALS_params, apply_IRF=True, apply_PG=True, t_PG=1, delta_xtick=20, save_fn=None):
+	def plot_data_model(self, t, tbin, data, model_params, ALS_params, delta_xtick=20, save_fn=None, print_cost=True):
 		'''
 		Plots the model overlaid on the inputted species data with residuals
 		Only plots species for which fit=True in the data dataframe
 		'''
-		# TODO:
-		# Add print cost functionality
-		# Add save functionality
 
 		# Run the model
 		t_start = t.min()
 		t_end = t.max()
-		t_model, c_model = self.run(t_start, t_end, tbin, model_params, ALS_params, apply_IRF, apply_PG, t_PG)
+		t_model, c_model = self._model(t_start, t_end, tbin, model_params['val'].to_dict(), ALS_params['val'].to_dict())
 
 		# Only plot the species for which fit=True
-		# Columns of data_val are species and the rows correspond to times in t array
+		# Columns of data_val and data_err are species and the rows correspond to times in t array
 		data_fit = data[data['fit']]
 		species_names = list(data_fit.index)
 		nSpecies = len(species_names)
 		data_val = pd.DataFrame(list(data_fit['val']), index=species_names).T
+		if self._err_weight:
+			data_err = pd.DataFrame(list(data_fit['err']), index=species_names).T
+
+		# Setup for cost computation
+		# t and t_model should match exactlty
+		cost = 0
+		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= ALS_params.at['t0','val'])	# Boolean array
 
 		# Set up the grid of subplots
 		nrows = round(nSpecies/3) if (nSpecies%3) == 0 else round((nSpecies//3)+1)
@@ -200,8 +224,16 @@ class KineticModel:
 		# Make the subplots
 		s_model = []
 		for i, species in enumerate(species_names):
+			obs = data_val[species]
 			mod = ALS_params.loc['S_'+species,'val']*c_model[species]
 			s_model.append(mod)
+
+			# Compute this species' contribution to the cost
+			cost_i = np.sqrt(data_fit.at[species,'weight']) * (obs-mod).values
+			if self._err_weight:
+				err = data_err[species]
+				cost_i = cost_i / err.values
+			cost += (cost_i[idx_cost]**2).sum()
 
 			j = i // 3	# Row index
 			k = i % 3	# Col index
@@ -210,10 +242,10 @@ class KineticModel:
 			ax0 = plt.subplot(gs_jk[0])	# Data & Fit
 			ax1 = plt.subplot(gs_jk[1])	# Data - Fit
 
-			ax0.plot(t, data_val[species], 'o')			# Plot the data
-			ax0.plot(t_model, mod, linewidth=2)			# Plot the fit
-			ax1.plot(t, data_val[species]-mod, 'o')		# Plot residual
-			ax1.plot(t, np.zeros(t.shape))				# Plot zero residual line
+			ax0.plot(t, obs, 'o')				# Plot the data
+			ax0.plot(t_model, mod, linewidth=2)	# Plot the fit
+			ax1.plot(t, obs-mod, 'o')			# Plot residual
+			ax1.plot(t, np.zeros(t.shape))		# Plot zero residual line
 
 			# Manually set x-axis ticks
 			ax0.set_xticks(ticks)
@@ -229,57 +261,95 @@ class KineticModel:
 
 		plt.show()
 
+		# Print the value of the cost function
+		if print_cost:
+			print()
+			print('Cost Function Value = {:g}'.format(cost))
+
+		# Save the scaled model traces
 		if save_fn:
 			df = pd.DataFrame(s_model).T
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 
-
-	def run(self, t_start, t_end, tbin, model_params, ALS_params, apply_IRF=True, apply_PG=True, t_PG=1): #, plot_results=True, save=False, filename=''):
-		'''
-		# Inputs:  time axis, params - all fixed, species for which we want output, flags for plotting
-		# Returns: concentrations as a function of time for each of the species
-		# Only uses 'val' column of parameters
-
-		# t_start and t_end need to be integer multiples of dt*tbin and t_PG
-		'''
-
-		model_params_val = model_params['val'].to_dict()
-		ALS_params_val = ALS_params['val'].to_dict()
-
-		t_model, c_model = self._model(t_start, t_end, tbin, model_params_val, ALS_params_val, apply_IRF, apply_PG, t_PG)
-
-		return t_model, c_model
-
-	def plot_model(self):
+	def plot_model(self, t_start, t_end, tbin, model_params, ALS_params, delta_xtick=20, save_fn=None):
 		'''
 		Plots the model without the data
+		Plots all sepcies defined that are returned by the user model function
 		'''
-		pass
+
+		# Run the model
+		t_model, c_model = self._model(t_start, t_end, tbin, model_params['val'].to_dict(), ALS_params['val'].to_dict())
+		species_names = list(c_model.columns)
+		nSpecies = len(species_names)
+
+		# Set up the grid of subplots
+		nrows = round(nSpecies/3) if (nSpecies%3) == 0 else round((nSpecies//3)+1)
+		ncols = 3
+		dpi = 120
+
+		plt.rc('font', size=9)
+		f = plt.figure(figsize=(1000/dpi,325*nrows/dpi), dpi=dpi)
+		gs = gridspec.GridSpec(nrows, ncols, figure=f, hspace=0.45, wspace=0.3, top=0.9, bottom=0.2)
+
+		# Determine x-axis ticks
+		tick_low = (t_start//delta_xtick)*delta_xtick
+		tick_high = t_end if t_end % delta_xtick == 0. else ((t_end//delta_xtick)+1)*delta_xtick
+		ticks = np.linspace(tick_low, tick_high, num=round(((tick_high-tick_low)/delta_xtick)+1), endpoint=True)
+
+		# Make the subplots
+		s_model = []
+		for i, species in enumerate(species_names):
+			mod = c_model[species]
+			s_model.append(mod)
+
+			j = i // 3	# Row index
+			k = i % 3	# Col index
+
+			ax = plt.subplot(gs[j,k])
+			ax.plot(t_model, mod, linewidth=2)
+
+			# Manually set x-axis ticks
+			ax.set_xticks(ticks)
+
+			# Labels
+			ax.set_title(species, fontweight='bold')	 # Make the title the species name
+			ax.set_xlabel('Time (ms)')					 # Set x-axis label for bottom plot
+			if k == 0:									 # Set y-axis labels if plot is in first column
+				ax.set_ylabel('Concentration ($\mathregular{molc/cm^{3}})$')
+
+		plt.show()
+
+		# Save the model traces
+		if save_fn:
+			df = pd.DataFrame(s_model).T
+			df.insert(0,'t',t_model)
+			df.to_csv(save_fn, index=False)
 	
+	'''
 	def bootstrap(self):
-		'''
-		If fit_pre_photo is True then only sample from t >= t0
-		'''
-		# Be sure to make a copy of the data frame so it doesn't get overwritten
+		# If fit_pre_photo is False then only sample from t >= t0
+		# Do we still need to pass pre photo data if fit_pre_photo is False?
+		# Possibly, if we end up calculating any sensitivities from pre photo data (ex: S_H2O2)
+
+		# Be sure to make a copy of the data frames so it doesn't get overwritten
 
 		pass
 
 	def monte_carlo_params(self):
-		'''
-		Need to make sure parameters don't become nonphysical (e.g. negative rate constants) when simulating
-		'''
+		# Need to make sure parameters don't become nonphysical (e.g. negative rate constants) when simulating
 		# Be sure to make a copy of the params data frames so that they don't get overwritten
 		# When throwing our unrealistic parameters during Monte Carlo sampling, force the distributions to still be symmetric and renormalize
 
-
+		# Be sure to make a copy of the data frames so it doesn't get overwritten
 
 		pass
+	'''
 
 	def _time_axis(self, t_start, t_end, tbin):
 		return np.linspace(t_start, t_end, num=round(((t_end-t_start)/(tbin*self._dt))+1), endpoint=True)
 
-	def _model(self, t_start, t_end, tbin, model_params, ALS_params, apply_IRF, apply_PG, t_PG):
+	def _model(self, t_start, t_end, tbin, model_params, ALS_params):
 		# model_params and ALS_params are now dictionaries
 		# Only A, B, and t0 are used from ALS_params - the sensitivity parameters are ignored
 		# A copy is created for anything passed to the user model to prevent problems with any mutable objects
@@ -306,7 +376,7 @@ class KineticModel:
 			t = self._time_axis(-20-t0, t_end+((tbin-1)*self._dt), 1)
 		
 		# Model integration w/ photolysis gradient
-		if apply_PG:
+		if self._apply_PG:
 
 			X0 = model_params['X0']
 			B = ALS_params['B']
@@ -317,15 +387,16 @@ class KineticModel:
 
 			# Then populate concentration matrix for t >= 0
 			idx_curr = idx_zero
-			idx_step = round(t_PG/self._dt)
+			idx_step = round(self._t_PG/self._dt)
 
 			while idx_curr < t.size:
-				t_mid = t[idx_curr] + t_PG/2
+				t_mid = t[idx_curr] + self._t_PG/2
 				X_curr = X0*(1+B*t_mid)
 
 				model_params_curr = model_params.copy()
 				model_params_curr['X0'] = X_curr
 
+				# If idx_curr+idx_step >= t.size, then t[:idx_curr+idx_step] is equivalent to t[:]
 				c_tmp = self._user_model(t[:idx_curr+idx_step].copy(), model_params_curr)[1]
 
 				for species in c:
@@ -338,7 +409,7 @@ class KineticModel:
 			m, c = self._user_model(t.copy(), model_params.copy())
 
 		# Convolve with IRF
-		if apply_IRF:
+		if self._apply_IRF:
 			c = self._conv_IRF(m, c, t.size, ALS_params['A'])
 
 		# Apply photolysis offset (the sign of this is correct)
@@ -380,15 +451,15 @@ class KineticModel:
 
 		Note that this operation is not quite a "convolution" as one might usually think about it,
 		since a convolved point only contains contributions from the modeled points at earlier times,
-		and has zero contribution from modeled points at later times.
+		and has zero contribution from modeled points at future times.
 
-		Inputs:
+		Parameters:
 		m = dictionary: keys are species, values are their masses (amu)
 		y = dictionary: keys are species, values are arrays of their signals
 		N = int: length of signal arrays
 		A = float: IRF parameter (amu-1)
 
-		Outputs:
+		Returns:
 		y_conv = dictionary: keys are species, values are arrays of their signals convolved with IRF
 		'''
 
@@ -401,7 +472,6 @@ class KineticModel:
 			# Leave h(0) = 0 (lim h t-->0 = 0, although directly calculating h(0) is undefined)
 			h[species][1:] = np.exp((A * m[species]) / (t[1:])**2) / (t[1:])**4
 		
-
 		# Compute convolved signals (y_conv)
 		y_conv = {}
 		for species in y:
@@ -409,7 +479,7 @@ class KineticModel:
 		for i in range(t.size):
 
 			for species in y_conv:
-				norm_factor = np.sum(h[species][:i+1])
+				norm_factor = (h[species][:i+1]).sum()
 
 				# Initially, norm_factor = 0 since the t and y arrays are finite and there is a lag between molecules exiting the pinhole and being detected.
 				# Therefore, to avoid divide by 0 errors when norm_factor = 0, it makes the most physical sense to set y_conv[species][i] = y[species][0].
@@ -418,6 +488,6 @@ class KineticModel:
 				if norm_factor == 0.:
 					y_conv[species][i] = y[species][0]
 				else:
-					y_conv[species][i] = np.sum(y[species][:i+1] * np.flip(h[species][:i+1],0)) / norm_factor
+					y_conv[species][i] = (y[species][:i+1] * np.flip(h[species][:i+1],0)).sum() / norm_factor
 
 		return y_conv

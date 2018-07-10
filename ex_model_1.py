@@ -105,4 +105,5 @@ def model_H2O2_depletion(t, model_params):
 		c['OH'][idx_zero:]   = odeint_out.T[1]
 		c['HO2'][idx_zero:]  = odeint_out.T[2]
 
+	# First return
 	return m, c
