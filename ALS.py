@@ -272,7 +272,7 @@ class KineticModel:
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 
-	def plot_model(self, t_start, t_end, tbin, model_params, ALS_params, delta_xtick=20, save_fn=None):
+	def plot_model(self, t_start, t_end, tbin, model_params, ALS_params, delta_xtick=20.0, save_fn=None):
 		'''
 		Plots the model without the data
 		Plots all sepcies defined that are returned by the user model function
