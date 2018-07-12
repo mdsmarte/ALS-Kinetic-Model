@@ -42,7 +42,7 @@ class KineticModel:
 		self._apply_PG = apply_PG
 		self._t_PG = t_PG
 
-	def fit(self, t, tbin, data, model_params, ALS_params, delta_xtick=20, save_fn=None, **kwargs):
+	def fit(self, t, tbin, df_data, df_model_params, ALS_params, delta_xtick=20.0, save_fn=None, **kwargs):
 		'''
 		Input:   time axis, species data, params - initial guesses as well as fixed paremters, flags for using IRF and photolysis gradient,
 		         flags for printing the output and plotting the fits, full output or abbreviated output
@@ -68,14 +68,14 @@ class KineticModel:
 
 		# Organize fitted species data into data_val and data_err frames
 		# Columns of data_val and data_err are species and the rows correspond to times in t array
-		data_fit = data[data['fit']]
+		data_fit = df_data[df_data['fit']]
 		species_names = list(data_fit.index)
 		data_val = pd.DataFrame(list(data_fit['val']), index=species_names).T
 		if self._err_weight:
 			data_err = pd.DataFrame(list(data_fit['err']), index=species_names).T
 
 		# Organize the fit parameters
-		model_params_fit = model_params[model_params['fit']] 
+		model_params_fit = df_model_params[df_model_params['fit']] 
 		ALS_params_fit = ALS_params[ALS_params['fit']]
 		p_names = list(model_params_fit.index) + list(ALS_params_fit.index)
 		p0 = np.concatenate((model_params_fit['val'], ALS_params_fit['val']))
@@ -93,8 +93,8 @@ class KineticModel:
 
 			# Organize parameter values used for the current iteration of the fit into dictionaries
 			model_params_p = {}
-			for param in model_params.index:
-				model_params_p[param] = p[p_names.index(param)] if param in p_names else model_params.at[param,'val']
+			for param in df_model_params.index:
+				model_params_p[param] = p[p_names.index(param)] if param in p_names else df_model_params.at[param,'val']
 			ALS_params_p = {}
 			for param in ALS_params.index:
 				ALS_params_p[param] = p[p_names.index(param)] if param in p_names else ALS_params.at[param,'val']
@@ -169,20 +169,20 @@ class KineticModel:
 		print()
 
 		# Plot the fits
-		model_params_p = model_params.copy()
+		df_model_params_p = df_model_params.copy()
 		ALS_params_p = ALS_params.copy()
 
 		for param in df_p.index:
-			if param in model_params_p.index:
-				model_params_p.at[param,'val'] = df_p.at[param,'val']
+			if param in df_model_params_p.index:
+				df_model_params_p.at[param,'val'] = df_p.at[param,'val']
 			else:
 				ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-		self.plot_data_model(t, tbin, data, model_params_p, ALS_params_p, delta_xtick, save_fn, False)
+		self.plot_data_model(t, tbin, df_data, df_model_params_p, ALS_params_p, delta_xtick, save_fn, False)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
-	def plot_data_model(self, t, tbin, data, model_params, ALS_params, delta_xtick=20, save_fn=None, print_cost=True):
+	def plot_data_model(self, t, tbin, df_data, df_model_params, ALS_params, delta_xtick=20.0, save_fn=None, print_cost=True):
 		'''
 		Plots the model overlaid on the inputted species data with residuals
 		Only plots species for which fit=True in the data dataframe
@@ -191,11 +191,11 @@ class KineticModel:
 		# Run the model
 		t_start = t.min()
 		t_end = t.max()
-		t_model, c_model = self._model(t_start, t_end, tbin, model_params['val'].to_dict(), ALS_params['val'].to_dict())
+		t_model, c_model = self._model(t_start, t_end, tbin, df_model_params['val'].to_dict(), ALS_params['val'].to_dict())
 
 		# Only plot the species for which fit=True
 		# Columns of data_val and data_err are species and the rows correspond to times in t array
-		data_fit = data[data['fit']]
+		data_fit = df_data[df_data['fit']]
 		species_names = list(data_fit.index)
 		nSpecies = len(species_names)
 		data_val = pd.DataFrame(list(data_fit['val']), index=species_names).T
@@ -272,14 +272,14 @@ class KineticModel:
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 
-	def plot_model(self, t_start, t_end, tbin, model_params, ALS_params, delta_xtick=20.0, save_fn=None):
+	def plot_model(self, t_start, t_end, tbin, df_model_params, ALS_params, delta_xtick=20.0, save_fn=None):
 		'''
 		Plots the model without the data
 		Plots all sepcies defined that are returned by the user model function
 		'''
 
 		# Run the model
-		t_model, c_model = self._model(t_start, t_end, tbin, model_params['val'].to_dict(), ALS_params['val'].to_dict())
+		t_model, c_model = self._model(t_start, t_end, tbin, df_model_params['val'].to_dict(), ALS_params['val'].to_dict())
 		species_names = list(c_model.columns)
 		nSpecies = len(species_names)
 
@@ -457,14 +457,14 @@ class KineticModel:
 		m = dictionary: keys are species, values are their masses (amu)
 		y = dictionary: keys are species, values are arrays of their signals
 		N = int: length of signal arrays
-		A = float: IRF parameter (amu-1)
+		A = float: IRF parameter (ms2/amu)
 
 		Returns:
 		y_conv = dictionary: keys are species, values are arrays of their signals convolved with IRF
 		'''
 
 		# Define convolution functions (h)
-		t = np.arange(N)*self._dt
+		t = np.arange(N)*self._dt	# ms
 		h = {}
 		for species in m:
 			h[species] = np.zeros(N)

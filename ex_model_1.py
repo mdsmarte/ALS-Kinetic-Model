@@ -1,31 +1,21 @@
+# Import modules
 import numpy as np
 from scipy.integrate import odeint
-
-# Compute a bimolecular rate constant
-def calc_k_bi(A, E_R, T):
-	k = A*np.exp(-E_R/T)
-	return k
-
-# Compute a termolecular association rate constant
-def calc_k_ter(k0_300, n, kinf_300, m, T, M):
-	k0 = k0_300*(T/300)**(-n)
-	kinf = kinf_300*(T/300)**(-m)
-	k_for = (k0*M/(1+k0*M/kinf))*0.6**((1+(np.log10(k0*M/kinf))**2)**(-1))
-	return k_for
 
 # Define the user model
 def model_H2O2_depletion(t, model_params):
 	# First argument is a numpy array of times (ms)
-	# Second argument is a dictionary of model parameters
+	# Second argument is a dictionary of model parameters: keys are the parameter names 
 
 	# User-defined parameters, X0 must always be included as the initial radical concentration
 	# Any parameter that you would like to fit or include in a monte carlo uncertainty simulation must be defined in model_params
 	X0 = model_params['X0']					# Initial OH concentration (molc/cm3)
-	T = model_params['T']					# Temperature (K)
-	P = model_params['P']					# Pressure (Torr)
 	c_H2O2_0 = model_params['c_H2O2_0']		# Initial H2O2 concentration (molc/cm3)
 	k_OH_wall = model_params['k_OH_wall']	# OH wall loss rate (s-1)
 	k_HO2_wall = model_params['k_HO2_wall']	# HO2 wall loss rate (s-1)
+	k1 = model_params['k1']					# OH + H2O2 --> HO2 + H2O (cm3/molc/s)
+	k2 = model_params['k2']					# OH + HO2 --> H2O + O2 (cm3/molc/s)
+	k3 = model_params['k3']					# HO2 + HO2 --> H2O2 + O2 (cm3/molc/s)
 
 	# Need to define m and c dictionaries for any species you want the model to output.
 	# Any species for which you have data and want to perform a fit are required.
@@ -41,7 +31,7 @@ def model_H2O2_depletion(t, model_params):
 	# Initially, create arrays that are the same size as t with ALL entries being the pre-photolysis (t < 0) concentration
 	# We will update these arrays later to contain the modeled concentrations post-photolysis (t >= 0)
 	c = {}
-	c['H2O2'] = np.ones(t.size)*c_H2O2_0
+	c['H2O2'] = c_H2O2_0*np.ones(t.size)
 	c['OH']   = np.zeros(t.size)
 	c['HO2']  = np.zeros(t.size)
 
@@ -55,21 +45,6 @@ def model_H2O2_depletion(t, model_params):
 	y0 = np.array([H2O2_0, OH_0, HO2_0, H2O_0, O2_0])
 
 	# Define the kinetic model
-
-	M = (P*133.3224)/(1.38e-23*T)/1e6
-	
-	# OH + H2O2 --> HO2 + H2O
-	# JPL 2015, temperature independent over 200 - 300 K
-	k1 = 1.8e-12
-
-	# OH + HO2 --> H2O + O2
-	# JPL 2015, T = 252-420 K
-	k2 = calc_k_bi(4.8e-11, -250, T)
-
-	# HO2 + HO2 --> H2O2 + O2
-	# JPL 2015, T = 222-1120 K, M is air
-	k3 = calc_k_bi(3e-13, -460, T) + calc_k_bi(2.1e-33*M, -920, T)
-
 	def calc_dy_dt(y, t_curr):
 		# Positions of species in y correspond to the order of species in initial concentration array
 		# t_curr is not used since reaction rates depend only on concentrations
