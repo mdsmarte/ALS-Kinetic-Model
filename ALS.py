@@ -35,6 +35,11 @@ class KineticModel:
 	_dt = 0.02	# Fundamental kinetic time step (ms)
 
 	def __init__(self, user_model, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1.0):
+		'''
+		Initializor for a KineticModel object.
+		See ex_notebook_1.ipynb for API documentation.
+		'''
+
 		self._user_model = user_model
 		self._err_weight = err_weight
 		self._fit_pre_photo = fit_pre_photo
@@ -42,7 +47,7 @@ class KineticModel:
 		self._apply_PG = apply_PG
 		self._t_PG = t_PG
 
-	def fit(self, t, tbin, df_data, df_model_params, ALS_params, delta_xtick=20.0, save_fn=None, **kwargs):
+	def fit(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, **kwargs):
 		'''
 		Input:   time axis, species data, params - initial guesses as well as fixed paremters, flags for using IRF and photolysis gradient,
 		         flags for printing the output and plotting the fits, full output or abbreviated output
@@ -54,7 +59,7 @@ class KineticModel:
 		'''
 		
 		# Check fit t0 / fit_pre_photo
-		if ALS_params.at['t0','fit'] and not self._fit_pre_photo:
+		if df_ALS_params.at['t0','fit'] and not self._fit_pre_photo:
 			print('ERROR: Fit t0 is True but fit_pre_photo is False!')
 			print('If we are fitting t0, then we must also fit the pre-photolysis data.')
 			print('Otherwise, the cost function would be minimized by arbitrarily increasing t0.')
@@ -64,7 +69,7 @@ class KineticModel:
 		# Determine start time, end time, and range of times over which to fit
 		t_start = t.min()
 		t_end = t.max()
-		idx_data = np.full(t.shape, True) if self._fit_pre_photo else (t >= ALS_params.at['t0','val'])	# Boolean array
+		idx_data = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])	# Boolean array
 
 		# Organize fitted species data into data_val and data_err frames
 		# Columns of data_val and data_err are species and the rows correspond to times in t array
@@ -76,7 +81,7 @@ class KineticModel:
 
 		# Organize the fit parameters
 		model_params_fit = df_model_params[df_model_params['fit']] 
-		ALS_params_fit = ALS_params[ALS_params['fit']]
+		ALS_params_fit = df_ALS_params[df_ALS_params['fit']]
 		p_names = list(model_params_fit.index) + list(ALS_params_fit.index)
 		p0 = np.concatenate((model_params_fit['val'], ALS_params_fit['val']))
 
@@ -96,8 +101,8 @@ class KineticModel:
 			for param in df_model_params.index:
 				model_params_p[param] = p[p_names.index(param)] if param in p_names else df_model_params.at[param,'val']
 			ALS_params_p = {}
-			for param in ALS_params.index:
-				ALS_params_p[param] = p[p_names.index(param)] if param in p_names else ALS_params.at[param,'val']
+			for param in df_ALS_params.index:
+				ALS_params_p[param] = p[p_names.index(param)] if param in p_names else df_ALS_params.at[param,'val']
 
 			# Run the model - we only need the concentrations dataframe
 			c_model = self._model(t_start, t_end, tbin, model_params_p, ALS_params_p)[1]
@@ -170,19 +175,19 @@ class KineticModel:
 
 		# Plot the fits
 		df_model_params_p = df_model_params.copy()
-		ALS_params_p = ALS_params.copy()
+		df_ALS_params_p = df_ALS_params.copy()
 
 		for param in df_p.index:
 			if param in df_model_params_p.index:
 				df_model_params_p.at[param,'val'] = df_p.at[param,'val']
 			else:
-				ALS_params_p.at[param,'val'] = df_p.at[param,'val']
+				df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-		self.plot_data_model(t, tbin, df_data, df_model_params_p, ALS_params_p, delta_xtick, save_fn, False)
+		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick, save_fn, False)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
-	def plot_data_model(self, t, tbin, df_data, df_model_params, ALS_params, delta_xtick=20.0, save_fn=None, print_cost=True):
+	def plot_data_model(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, print_cost=True):
 		'''
 		Plots the model overlaid on the inputted species data with residuals
 		Only plots species for which fit=True in the data dataframe
@@ -191,7 +196,7 @@ class KineticModel:
 		# Run the model
 		t_start = t.min()
 		t_end = t.max()
-		t_model, c_model = self._model(t_start, t_end, tbin, df_model_params['val'].to_dict(), ALS_params['val'].to_dict())
+		t_model, c_model = self._model(t_start, t_end, tbin, df_model_params['val'].to_dict(), df_ALS_params['val'].to_dict())
 
 		# Only plot the species for which fit=True
 		# Columns of data_val and data_err are species and the rows correspond to times in t array
@@ -203,9 +208,9 @@ class KineticModel:
 			data_err = pd.DataFrame(list(data_fit['err']), index=species_names).T
 
 		# Setup for cost computation
-		# t and t_model should match exactlty
+		# t and t_model should match exactly
 		cost = 0
-		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= ALS_params.at['t0','val'])	# Boolean array
+		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])	# Boolean array
 
 		# Set up the grid of subplots
 		nrows = round(nSpecies/3) if (nSpecies%3) == 0 else round((nSpecies//3)+1)
@@ -225,7 +230,7 @@ class KineticModel:
 		s_model = []
 		for i, species in enumerate(species_names):
 			obs = data_val[species]
-			mod = ALS_params.loc['S_'+species,'val']*c_model[species]
+			mod = df_ALS_params.loc['S_'+species,'val']*c_model[species]
 			s_model.append(mod)
 
 			# Compute this species' contribution to the cost
@@ -272,14 +277,14 @@ class KineticModel:
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 
-	def plot_model(self, t_start, t_end, tbin, df_model_params, ALS_params, delta_xtick=20.0, save_fn=None):
+	def plot_model(self, t_start, t_end, tbin, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None):
 		'''
 		Plots the model without the data
 		Plots all sepcies defined that are returned by the user model function
 		'''
 
 		# Run the model
-		t_model, c_model = self._model(t_start, t_end, tbin, df_model_params['val'].to_dict(), ALS_params['val'].to_dict())
+		t_model, c_model = self._model(t_start, t_end, tbin, df_model_params['val'].to_dict(), df_ALS_params['val'].to_dict())
 		species_names = list(c_model.columns)
 		nSpecies = len(species_names)
 
