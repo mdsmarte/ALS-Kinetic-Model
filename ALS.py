@@ -49,13 +49,8 @@ class KineticModel:
 
 	def fit(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, **kwargs):
 		'''
-		Input:   time axis, species data, params - initial guesses as well as fixed paremters, flags for using IRF and photolysis gradient,
-		         flags for printing the output and plotting the fits, full output or abbreviated output
-		Returns: fitted parameters and their uncertainties
-		         if full output is specified, also return covariance matrix, correlation matrix, cost function value, leastsq mesg and ier
-
-		t is the time axis for the data values and errors
-		the smallest point in t can never be less than -20 ms
+		Method for fitting data and optimizing parameters.
+		See ex_notebook_1.ipynb for API documentation.
 		'''
 		
 		# Check fit t0 / fit_pre_photo
@@ -189,8 +184,10 @@ class KineticModel:
 
 	def plot_data_model(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, print_cost=True):
 		'''
-		Plots the model overlaid on the inputted species data with residuals
-		Only plots species for which fit=True in the data dataframe
+		Method for plotting the scaled model overlaid on the inputted species data. (No fit is performed.)
+		Residuals are also plotted and the value of the cost function with these parameters is optionally outputted.
+		Only species for which fit is True in df_data are shown and included in the cost calculation.
+		See ex_notebook_1.ipynb for API documentation.
 		'''
 
 		# Run the model
@@ -279,8 +276,9 @@ class KineticModel:
 
 	def plot_model(self, t_start, t_end, tbin, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None):
 		'''
-		Plots the model without the data
-		Plots all sepcies defined that are returned by the user model function
+		Plots the model in concentration units (molc/cm3) without the data.
+		All species returned by the user model function are shown.
+		See ex_notebook_1.ipynb for API documentation.
 		'''
 
 		# Run the model
@@ -352,24 +350,59 @@ class KineticModel:
 	'''
 
 	def _time_axis(self, t_start, t_end, tbin):
+		'''
+		Private method for computing time axes.
+
+		Parameters:
+		t_start = float: start time of time axis (inclusive), must be integer multiple of tbin*dt
+		t_end = float: end time of time axis (inclusive), must be integer multiple of tbin*dt
+		tbin = int: the axis will be evenly spaced by tbin*dt
+
+		Returns:
+		t = ndarray: the time axis
+		'''
 		return np.linspace(t_start, t_end, num=round(((t_end-t_start)/(tbin*self._dt))+1), endpoint=True)
 
 	def _model(self, t_start, t_end, tbin, model_params, ALS_params):
-		# model_params and ALS_params are now dictionaries
-		# Only A, B, and t0 are used from ALS_params - the sensitivity parameters are ignored
-		# A copy is created for anything passed to the user model to prevent problems with any mutable objects
+		'''
+		Private method for integrating the user model.
+		Implements the photolysis gradient, instrument response function, and photolysis offset.
+		A copy is created for anything passed to the user model to prevent problems with any mutable objects.
+	
+		Procedure:
+		1)	A time axis is created for running the model, with photolysis occurring at 0 ms.  
+			Forced to have at least 20 ms of pre-photolysis baseline to ensure correct IRF convolution of points immediately after photolysis.
+		2)	User model is integrated in steps (set by t_PG) with different initial radical concentrations (set by X0 and B).
+			For example, if t_PG = 1 ms, then:
+				- The 0-1 ms output is determined by integrating over 0-1 ms with initial radical concentration X0*(1+B*(0.5 ms)).
+				- The 1-2 ms output is determined by integrating over 0-2 ms with initial radical concentration X0*(1+B*(1.5 ms)), and taking the 1-2 ms portion.
+				- The 2-3 ms output is determined by integrating over 0-3 ms with initial radical concentration X0*(1+B*(2.5 ms)), and taking the 2-3 ms portion.
+				- Etc.
+		3)	The concentration profiles are convolved with the IRF (see conv_IRF).
+		4)	The time axis is adjusted for the photolysis offset t0.
+		5) 	The profiles are trimmed and averaged within time bins to achieve a step size of dt*tbin over [t_start, t_end].
 
-		# Wrapper function for running various models, implementing photolysis gradient and/or IRF
-		# Models must take initial radical concentration as a variable, which is updated based on the photolysis gradient
-		# X0 is the initial radical concentration
-		# args are additional optional arguments to pass to the model function
-		# kwargs contaings flags for using photolysis gradient or IRF
-		# add photolysis gradient parameter later
+		Parameters:
+		t_start = float
+			start time of the model output (ms), must be integer multiple of tbin*dt, must be greater than or equal to -20 ms
+		t_end = float
+			end time of the model output (ms), must be integer multiple of tbin*dt, must be greater than t_start
+		tbin = int
+			step size of the model output will be tbin*dt
+		model_params = dict
+			keys (str) are model param names and values (float) are the parameter values
+			X0 is required
+		ALS_params = dict
+			keys (str) are ALS param names and values (float) are the parameter values
+			t0 is required, A is required if apply_IRF = True, B is required if apply_PG = True
 
-		# t_start, t_end, t0, tbin_PG must always be integer multiples of 0.02 ms
-		# Minimum value of t_start is -20 ms
-		# t_start and t_end must be integer multiples of t_bin*dt
-		# t_end must be > 0 and t_start <= 0
+		Returns:
+		t_model = ndarray
+			Time axis of the model output (ms).  Evenly spaced by tbin*dt over [t_start, t_end].
+		c_model = DataFrame
+			Columns correspond to the species returned by the user model.
+			Rows correspond to the modeled concentrations at the times in t_model
+		'''
 
 		# Create time axis for running the model (before applying tbin and t0)
 		t0 = ALS_params['t0']
@@ -444,7 +477,7 @@ class KineticModel:
 
 	def _conv_IRF(self, m, y, N, A):
 		'''
-		Convolves signals with the mass-dependent ALS instrument response function.
+		Private method for convolving signals with the mass-dependent ALS instrument response function.
 
 		At the ALS, molecules exit the pinhole with a Maxwell-Boltzmann distribution of velocities.
 		The ion signal at a specific observation time therefore arises from molecules that exit the
@@ -459,13 +492,13 @@ class KineticModel:
 		and has zero contribution from modeled points at future times.
 
 		Parameters:
-		m = dictionary: keys are species, values are their masses (amu)
-		y = dictionary: keys are species, values are arrays of their signals
+		m = dictionary: keys are species (str), values are their masses (float - amu)
+		y = dictionary: keys are species (str), values are arrays of their signals (ndarray)
 		N = int: length of signal arrays
 		A = float: IRF parameter (ms2/amu)
 
 		Returns:
-		y_conv = dictionary: keys are species, values are arrays of their signals convolved with IRF
+		y_conv = dictionary: keys are species (str), values are arrays of their signals convolved with IRF (ndarray)
 		'''
 
 		# Define convolution functions (h)
