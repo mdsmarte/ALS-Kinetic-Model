@@ -4,7 +4,7 @@ from scipy.integrate import odeint
 
 # Define the user model
 def model_H2O2_depletion(t, model_params):
-	# First argument is a numpy array of times (ms)
+	# First argument is a numpy array of times - evenly spaced in ascending order (ms)
 	# Second argument is a dictionary of model parameters: keys are the parameter names 
 
 	# User-defined parameters, X0 must always be included as the initial radical concentration
