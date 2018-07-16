@@ -1,6 +1,6 @@
 # Author: Matthew Smarte
 # Version: 1.0.0
-# Date: 7/10/18
+# Date: 7/16/18
 
 # This code is designed to be imported and run inside a Jupyter notebook using an iPython kernel.
 
