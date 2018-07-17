@@ -18,12 +18,14 @@ matplotlib 	2.2.2
 ipython 	5.3.0
 '''
 
+import time
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import leastsq
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from IPython.display import display
+from IPython.display import display, clear_output
 
 # TODO:
 # Write bootstrap / monte_carlo_params functions
@@ -329,16 +331,30 @@ class KineticModel:
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 	
-	'''
-	def bootstrap(self):
+	
+	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N=1000, save_fn=None, **kwargs):
 		# If fit_pre_photo is False then only sample from t >= t0
 		# Do we still need to pass pre photo data if fit_pre_photo is False?
-		# Possibly, if we end up calculating any sensitivities from pre photo data (ex: S_H2O2)
+		# Possibly, if we end up calculating any sensitivities using the pre photo data (ex: S_H2O2)
+		# Otherwise it is not necessary
+		# For now, going to assume passing pre photo data will not be necessary
 
-		# Be sure to make a copy of the data frames so it doesn't get overwritten
+		# Be sure to make a copy of the data frames when passing so they don't get overwritten
+		# Returns df_p, df_cov_p, df_corr_p, df_dist_p
 
-		pass
+		idx_data = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])
 
+		i = 0
+		N_success = 0
+		N_fail = 0
+
+		while i < N:
+			clear_output(wait=True)
+			print('Current Iteration: {:d} of {:d}'.format(i+1, N))
+
+			i += 1
+
+	'''
 	def monte_carlo_params(self):
 		# Need to make sure parameters don't become nonphysical (e.g. negative rate constants) when simulating
 		# Be sure to make a copy of the params data frames so that they don't get overwritten
