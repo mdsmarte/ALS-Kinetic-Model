@@ -18,8 +18,6 @@ matplotlib 	2.2.2
 ipython 	5.3.0
 '''
 
-import time
-
 import numpy as np
 import pandas as pd
 from scipy.optimize import leastsq
@@ -352,6 +350,8 @@ class KineticModel:
 			clear_output(wait=True)
 			print('Current Iteration: {:d} of {:d}'.format(i+1, N))
 
+
+			# Save the output as the function runs so it may be accessed during a simulation
 			i += 1
 
 	'''
