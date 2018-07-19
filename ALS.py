@@ -32,6 +32,7 @@ from IPython.display import display, clear_output
 
 class KineticModel:
 
+	_i = 0 # DEBUG
 	_dt = 0.02	# Fundamental kinetic time step (ms)
 
 	def __init__(self, user_model, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1.0):
@@ -58,12 +59,11 @@ class KineticModel:
 			print('ERROR: Fit t0 is True but fit_pre_photo is False!')
 			print('If we are fitting t0, then we must also fit the pre-photolysis data.')
 			print('Otherwise, the cost function would be minimized by arbitrarily increasing t0.')
-
 			return None, None, None, None, None, None
 
 		# Determine start time, end time, and range of times over which to fit
-		t_start = t.min()
-		t_end = t.max()
+		t_start = float(t.min())
+		t_end = float(t.max())
 		idx_data = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])	# Boolean array
 
 		# Organize fitted species data into data_val and data_err frames
@@ -88,7 +88,11 @@ class KineticModel:
 		t_model = self._time_axis(t_start, t_end, tbin)
 		idx_model = [np.abs(t_model - t[idx_data][_]).argmin() for _ in range(sum(idx_data))]	# Array of positional indices
 
-		# Define the cost function to be optimized
+		#print(t_model[idx_model]) # DEBUG
+
+		self._i = 0 # DEBUG
+
+		# Define the cost functio n to be optimized
 		def calc_cost(p):
 
 			# Organize parameter values used for the current iteration of the fit into dictionaries
@@ -100,26 +104,32 @@ class KineticModel:
 				ALS_params_p[param] = p[p_names.index(param)] if param in p_names else df_ALS_params.at[param,'val']
 
 			# Run the model - we only need the concentrations dataframe
-			c_model = self._model(t_start, t_end, tbin, model_params_p, ALS_params_p)[1]
+			t_model, c_model = self._model(t_start, t_end, tbin, model_params_p, ALS_params_p) # DEBUG
+
+			#print(t[idx_data]) # DEBUG
+			#print(t_model[idx_model]) # DEBUG
 
 			# Calculate the weighted residual array
 			res = []
 			for species in species_names:
 				# Remember: idx_data is a boolean array and idx_model is an array of positional indices
-				obs = data_val.loc[idx_data,species]
-				mod = ALS_params_p['S_'+species] * c_model.iloc[idx_model,c_model.columns.get_loc(species)]
+				# Important to perform .values conversion to array BEFORE we subtract obs and mod (pandas subtracts Series by index agreement not position)
+				obs = data_val.loc[idx_data,species].values
+				mod = ALS_params_p['S_'+species] * c_model.iloc[idx_model,c_model.columns.get_loc(species)].values
 
 				# We take the sqrt of the weight since leastsq will square the array later
-				species_res = np.sqrt(data_fit.at[species,'weight']) * (obs-mod).values
+				species_res = np.sqrt(data_fit.at[species,'weight']) * (obs-mod)
 
 				if self._err_weight:
-					err = data_err.loc[idx_data, species]
-					species_res = species_res / err.values
+					err = data_err.loc[idx_data, species].values
+					species_res = species_res / err
 
 				res.append(species_res)
 
 			# leastsq will square then sum all entries in the returned array, and minimize this cost value
 			return np.concatenate(res)
+
+		print(((calc_cost(p0))**2).sum()) # DEBUG
 
 		# Perform the fit
 		# NOTE: The backend of leastsq will automatically autoscale the fit parameters to the same order of magnitude if diag=None (default).
@@ -191,8 +201,8 @@ class KineticModel:
 		'''
 
 		# Run the model
-		t_start = t.min()
-		t_end = t.max()
+		t_start = float(t.min())
+		t_end = float(t.max())
 		t_model, c_model = self._model(t_start, t_end, tbin, df_model_params['val'].to_dict(), df_ALS_params['val'].to_dict())
 
 		# Only plot the species for which fit=True
@@ -227,7 +237,7 @@ class KineticModel:
 		s_model = []
 		for i, species in enumerate(species_names):
 			obs = data_val[species]
-			mod = df_ALS_params.loc['S_'+species,'val']*c_model[species]
+			mod = df_ALS_params.at['S_'+species,'val']*c_model[species]
 			s_model.append(mod)
 
 			# Compute this species' contribution to the cost
@@ -329,7 +339,6 @@ class KineticModel:
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 	
-	
 	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N=1000, save_fn=None, **kwargs):
 		# If fit_pre_photo is False then only sample from t >= t0
 		# Do we still need to pass pre photo data if fit_pre_photo is False?
@@ -340,16 +349,40 @@ class KineticModel:
 		# Be sure to make a copy of the data frames when passing so they don't get overwritten
 		# Returns df_p, df_cov_p, df_corr_p, df_dist_p
 
+		# Check fit t0 / fit_pre_photo
+		if df_ALS_params.at['t0','fit'] and not self._fit_pre_photo:
+			print('ERROR: Fit t0 is True but fit_pre_photo is False!')
+			print('If we are fitting t0, then we must also fit the pre-photolysis data.')
+			print('Otherwise, the cost function would be minimized by arbitrarily increasing t0.')
+			return None, None, None, None
+
+		# Determine range of data over which to generate bootstrap samples
 		idx_data = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])
+		M = sum(idx_data)	# Length of each bootstrap sample
 
 		i = 0
 		N_success = 0
 		N_fail = 0
 
 		while i < N:
-			clear_output(wait=True)
+			#clear_output(wait=True)
 			print('Current Iteration: {:d} of {:d}'.format(i+1, N))
 
+			# Randomly generate indices (with replacement) that will be used to create the bootstrap sample
+			idx_i = np.random.choice(M, M)
+
+			# Create the bootstrap sample
+			t_i = t[idx_data][idx_i]
+			print(t_i) # DEBUG
+			df_data_i = df_data.copy()
+			for species in df_data_i.index:
+				df_data_i.at[species,'val'] = df_data_i.at[species,'val'][idx_data][idx_i]
+				print(df_data_i.at[species,'val']) # DEBUG
+				df_data_i.at[species,'err'] = df_data_i.at[species,'err'][idx_data][idx_i]
+				print(df_data_i.at[species,'err']) # DEBUG
+
+			# Fit the bootstrap sample
+			df_p_i, _, _, cost_i, mesg_i, ier_i = self.fit(t_i, tbin, df_data_i, df_model_params, df_ALS_params, 20.0, save_fn, **kwargs)
 
 			# Save the output as the function runs so it may be accessed during a simulation
 			i += 1
@@ -420,8 +453,13 @@ class KineticModel:
 			Rows correspond to the modeled concentrations at the times in t_model
 		'''
 
+		self._i += 1 # DEBUG
+		#print('Iteration: ' + str(self._i)) # DEBUG
+		#print(model_params) # DEBUG
+		#print(ALS_params) # DEBUG
+
 		# Create time axis for running the model (before applying tbin and t0)
-		t0 = ALS_params['t0']
+		t0 = float(ALS_params['t0'])
 		if t0 == 0:
 			t = self._time_axis(-20, t_end+((tbin-1)*self._dt), 1)
 		elif t0 < 0:
@@ -449,6 +487,8 @@ class KineticModel:
 
 				model_params_curr = model_params.copy()
 				model_params_curr['X0'] = X_curr
+
+				#print('User Model Run, Start of Current Time Bin = ' + str(t[idx_curr])) # DEBUG
 
 				# If idx_curr+idx_step >= t.size, then t[:idx_curr+idx_step] is equivalent to t[:]
 				c_tmp = self._user_model(t[:idx_curr+idx_step].copy(), model_params_curr)[1]
