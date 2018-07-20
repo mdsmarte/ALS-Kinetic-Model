@@ -64,7 +64,13 @@ class KineticModel:
 		# Determine start time, end time, and range of times over which to fit
 		t_start = float(t.min())
 		t_end = float(t.max())
-		idx_data = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])	# Boolean array
+		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val']) # Boolean array of indices to use in cost calculation
+
+		# Establish corrspondence between data and model time axes
+		# Each entry in t has an exact match to an entry in t_model
+		# We take the below approach (rather than ==) to prevent any problems with numerical roundoff
+		t_model = self._time_axis(t_start, t_end, tbin)
+		idx_model = [np.abs(t_model - t[_]).argmin() for _ in range(t.size)] # Array of positional indices, maps model axis --> data axis
 
 		# Organize fitted species data into data_val and data_err frames
 		# Columns of data_val and data_err are species and the rows correspond to times in t array
@@ -79,14 +85,6 @@ class KineticModel:
 		ALS_params_fit = df_ALS_params[df_ALS_params['fit']]
 		p_names = list(model_params_fit.index) + list(ALS_params_fit.index)
 		p0 = np.concatenate((model_params_fit['val'], ALS_params_fit['val']))
-
-		# Establish corrspondence between data and model time axes
-		# Each entry in t has an exact match to an entry in t_model
-		# If fit is being called directly, then t and t_model should match exactly and this is technically unnecessary
-		# However, if fit is called from bootstrap, we need to explicitly define the correspondence
-		# We take the below approach (rather than ==) to prevent any problems with numerical roundoff
-		t_model = self._time_axis(t_start, t_end, tbin)
-		idx_model = [np.abs(t_model - t[idx_data][_]).argmin() for _ in range(sum(idx_data))]	# Array of positional indices
 
 		#print(t_model[idx_model]) # DEBUG
 
@@ -109,27 +107,27 @@ class KineticModel:
 			#print(t[idx_data]) # DEBUG
 			#print(t_model[idx_model]) # DEBUG
 
-			# Calculate the weighted residual array
+			# Calculate the weighted residual array across points included in the cost computation
 			res = []
 			for species in species_names:
-				# Remember: idx_data is a boolean array and idx_model is an array of positional indices
-				# Important to perform .values conversion to array BEFORE we subtract obs and mod (pandas subtracts Series by index agreement not position)
-				obs = data_val.loc[idx_data,species].values
-				mod = ALS_params_p['S_'+species] * c_model.iloc[idx_model,c_model.columns.get_loc(species)].values
+				obs = data_val[species]
+				mod = ALS_params_p['S_'+species]*c_model[species]
 
 				# We take the sqrt of the weight since leastsq will square the array later
-				species_res = np.sqrt(data_fit.at[species,'weight']) * (obs-mod)
+				# Important to perform .values conversion to array BEFORE we subtract obs and mod (pandas subtracts Series by index agreement not position)
+				species_res = np.sqrt(data_fit.at[species,'weight']) * (obs.values - mod.values[idx_model])[idx_cost]
 
 				if self._err_weight:
-					err = data_err.loc[idx_data, species].values
-					species_res = species_res / err
+					err = data_err[species]
+					species_res = species_res / err.values[idx_cost]
 
 				res.append(species_res)
 
 			# leastsq will square then sum all entries in the returned array, and minimize this cost value
 			return np.concatenate(res)
 
-		print(((calc_cost(p0))**2).sum()) # DEBUG
+		print('Initial Cost Function Value: {:g}'.format((calc_cost(p0)**2).sum()))
+		print()
 
 		# Perform the fit
 		# NOTE: The backend of leastsq will automatically autoscale the fit parameters to the same order of magnitude if diag=None (default).
@@ -214,10 +212,10 @@ class KineticModel:
 		if self._err_weight:
 			data_err = pd.DataFrame(list(data_fit['err']), index=species_names).T
 
-		# Setup for cost computation
-		# t and t_model should match exactly
+		# Setup for residual and cost computations
 		cost = 0
-		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])	# Boolean array
+		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val']) # Boolean array of indices to use in cost calculation
+		idx_model = [np.abs(t_model - t[_]).argmin() for _ in range(t.size)] # Array of positional indices, maps model axis --> data axis
 
 		# Set up the grid of subplots
 		nrows = round(nSpecies/3) if (nSpecies%3) == 0 else round((nSpecies//3)+1)
@@ -240,12 +238,14 @@ class KineticModel:
 			mod = df_ALS_params.at['S_'+species,'val']*c_model[species]
 			s_model.append(mod)
 
-			# Compute this species' contribution to the cost
-			cost_i = np.sqrt(data_fit.at[species,'weight']) * (obs-mod).values
+			# Compute this species' residual and cost contribution
+			# Important to perform .values conversion to array BEFORE we subtract obs and mod (pandas subtracts Series by index agreement not position)
+			res = obs.values - mod.values[idx_model]
+			cost_i = np.sqrt(data_fit.at[species,'weight']) * res[idx_cost]
 			if self._err_weight:
 				err = data_err[species]
-				cost_i = cost_i / err.values
-			cost += (cost_i[idx_cost]**2).sum()
+				cost_i = cost_i / err.values[idx_cost]
+			cost += (cost_i**2).sum()
 
 			j = i // 3	# Row index
 			k = i % 3	# Col index
@@ -254,10 +254,10 @@ class KineticModel:
 			ax0 = plt.subplot(gs_jk[0])	# Data & Fit
 			ax1 = plt.subplot(gs_jk[1])	# Data - Fit
 
-			ax0.plot(t, obs, 'o')				# Plot the data
-			ax0.plot(t_model, mod, linewidth=2)	# Plot the fit
-			ax1.plot(t, obs-mod, 'o')			# Plot residual
-			ax1.plot(t, np.zeros(t.shape))		# Plot zero residual line
+			ax0.plot(t, obs, 'o')						# Plot the data
+			ax0.plot(t_model, mod, linewidth=2)			# Plot the fit
+			ax1.plot(t, res, 'o')						# Plot residual
+			ax1.plot(t_model, np.zeros(t_model.shape))	# Plot zero residual line
 
 			# Manually set x-axis ticks
 			ax0.set_xticks(ticks)
@@ -373,13 +373,13 @@ class KineticModel:
 
 			# Create the bootstrap sample
 			t_i = t[idx_data][idx_i]
-			print(t_i) # DEBUG
+			#print(t_i) # DEBUG
 			df_data_i = df_data.copy()
 			for species in df_data_i.index:
 				df_data_i.at[species,'val'] = df_data_i.at[species,'val'][idx_data][idx_i]
-				print(df_data_i.at[species,'val']) # DEBUG
+				#print(df_data_i.at[species,'val']) # DEBUG
 				df_data_i.at[species,'err'] = df_data_i.at[species,'err'][idx_data][idx_i]
-				print(df_data_i.at[species,'err']) # DEBUG
+				#print(df_data_i.at[species,'err']) # DEBUG
 
 			# Fit the bootstrap sample
 			df_p_i, _, _, cost_i, mesg_i, ier_i = self.fit(t_i, tbin, df_data_i, df_model_params, df_ALS_params, 20.0, save_fn, **kwargs)
