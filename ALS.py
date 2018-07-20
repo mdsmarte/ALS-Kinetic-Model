@@ -48,7 +48,7 @@ class KineticModel:
 		self._apply_PG = apply_PG
 		self._t_PG = t_PG
 
-	def fit(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, **kwargs):
+	def fit(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, quiet=False, **kwargs):
 		'''
 		Method for fitting data and optimizing parameters.
 		See ex_notebook_1.ipynb for API documentation.
@@ -126,8 +126,9 @@ class KineticModel:
 			# leastsq will square then sum all entries in the returned array, and minimize this cost value
 			return np.concatenate(res)
 
-		print('Initial Cost Function Value: {:g}'.format((calc_cost(p0)**2).sum()))
-		print()
+		if not quiet:
+			print('Initial Cost Function Value: {:g}'.format((calc_cost(p0)**2).sum()))
+			print()
 
 		# Perform the fit
 		# NOTE: The backend of leastsq will automatically autoscale the fit parameters to the same order of magnitude if diag=None (default).
@@ -159,34 +160,35 @@ class KineticModel:
 		df_cov_p = pd.DataFrame(cov_p, index=p_names, columns=p_names)
 		df_corr_p = pd.DataFrame(corr_p, index=p_names, columns=p_names)
 
-		# Display results
-		print('Optimization terminated successfully.' if ier in (1,2,3,4) else 'Optimization FAILED.')
-		print('Exit Code = {:d}'.format(ier))
-		print('Exit Message = {}'.format(mesg))
-		print()
+		if not quiet:
+			# Display results
+			print('Optimization terminated successfully.' if ier in (1,2,3,4) else 'Optimization FAILED.')
+			print('Exit Code = {:d}'.format(ier))
+			print('Exit Message = {}'.format(mesg))
+			print()
 
-		print('Optimized Cost Function Value = {:g}'.format(cost))
-		print()
+			print('Optimized Cost Function Value = {:g}'.format(cost))
+			print()
 
-		print('Optimized Parameters and Standard Errors:')
-		display(df_p)
-		print()
+			print('Optimized Parameters and Standard Errors:')
+			display(df_p)
+			print()
 
-		print('Correlation Matrix:')
-		display(df_corr_p)
-		print()
+			print('Correlation Matrix:')
+			display(df_corr_p)
+			print()
 
-		# Plot the fits
-		df_model_params_p = df_model_params.copy()
-		df_ALS_params_p = df_ALS_params.copy()
+			# Plot the fits
+			df_model_params_p = df_model_params.copy()
+			df_ALS_params_p = df_ALS_params.copy()
 
-		for param in df_p.index:
-			if param in df_model_params_p.index:
-				df_model_params_p.at[param,'val'] = df_p.at[param,'val']
-			else:
-				df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
+			for param in df_p.index:
+				if param in df_model_params_p.index:
+					df_model_params_p.at[param,'val'] = df_p.at[param,'val']
+				else:
+					df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick, save_fn, False)
+			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick, save_fn, False)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
