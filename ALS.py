@@ -32,7 +32,6 @@ from IPython.display import display, clear_output
 
 class KineticModel:
 
-	_i = 0 # DEBUG
 	_dt = 0.02	# Fundamental kinetic time step (ms)
 
 	def __init__(self, user_model, err_weight=True, fit_pre_photo=False, apply_IRF=True, apply_PG=True, t_PG=1.0):
@@ -86,10 +85,6 @@ class KineticModel:
 		p_names = list(model_params_fit.index) + list(ALS_params_fit.index)
 		p0 = np.concatenate((model_params_fit['val'], ALS_params_fit['val']))
 
-		#print(t_model[idx_model]) # DEBUG
-
-		self._i = 0 # DEBUG
-
 		# Define the cost functio n to be optimized
 		def calc_cost(p):
 
@@ -102,10 +97,7 @@ class KineticModel:
 				ALS_params_p[param] = p[p_names.index(param)] if param in p_names else df_ALS_params.at[param,'val']
 
 			# Run the model - we only need the concentrations dataframe
-			t_model, c_model = self._model(t_start, t_end, tbin, model_params_p, ALS_params_p) # DEBUG
-
-			#print(t[idx_data]) # DEBUG
-			#print(t_model[idx_model]) # DEBUG
+			_, c_model = self._model(t_start, t_end, tbin, model_params_p, ALS_params_p)
 
 			# Calculate the weighted residual array across points included in the cost computation
 			res = []
@@ -375,13 +367,10 @@ class KineticModel:
 
 			# Create the bootstrap sample
 			t_i = t[idx_data][idx_i]
-			#print(t_i) # DEBUG
 			df_data_i = df_data.copy()
 			for species in df_data_i.index:
 				df_data_i.at[species,'val'] = df_data_i.at[species,'val'][idx_data][idx_i]
-				#print(df_data_i.at[species,'val']) # DEBUG
 				df_data_i.at[species,'err'] = df_data_i.at[species,'err'][idx_data][idx_i]
-				#print(df_data_i.at[species,'err']) # DEBUG
 
 			# Fit the bootstrap sample
 			df_p_i, _, _, cost_i, mesg_i, ier_i = self.fit(t_i, tbin, df_data_i, df_model_params, df_ALS_params, 20.0, save_fn, **kwargs)
@@ -455,11 +444,6 @@ class KineticModel:
 			Rows correspond to the modeled concentrations at the times in t_model
 		'''
 
-		self._i += 1 # DEBUG
-		#print('Iteration: ' + str(self._i)) # DEBUG
-		#print(model_params) # DEBUG
-		#print(ALS_params) # DEBUG
-
 		# Create time axis for running the model (before applying tbin and t0)
 		t0 = float(ALS_params['t0'])
 		if t0 == 0:
@@ -489,8 +473,6 @@ class KineticModel:
 
 				model_params_curr = model_params.copy()
 				model_params_curr['X0'] = X_curr
-
-				#print('User Model Run, Start of Current Time Bin = ' + str(t[idx_curr])) # DEBUG
 
 				# If idx_curr+idx_step >= t.size, then t[:idx_curr+idx_step] is equivalent to t[:]
 				c_tmp = self._user_model(t[:idx_curr+idx_step].copy(), model_params_curr)[1]

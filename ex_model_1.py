@@ -2,10 +2,6 @@
 import numpy as np
 from scipy.integrate import odeint
 
-# DEBUG
-#import warnings
-#warnings.filterwarnings('error')
-
 # Define the user model
 def model_H2O2_depletion(t, model_params):
 	# First argument is a numpy array of times - evenly spaced in ascending order (ms)
@@ -77,13 +73,7 @@ def model_H2O2_depletion(t, model_params):
 		idx_zero = np.abs(t).argmin()
 
 		# Convert ms --> s, then integrate the model over t >= 0
-		
-		# DEBUG
-		#print(t[idx_zero:])
-		#try:
-		odeint_out, infodict = odeint(calc_dy_dt, y0, t[idx_zero:]/1000, full_output=1) # DEBUG: full_output
-		#except Warning as e:
-		#	#print(e)
+		odeint_out = odeint(calc_dy_dt, y0, t[idx_zero:]/1000)
 
 		# Update the concentration vector over t >= 0, positions correspond to order of species in initial concentration array
 		c['H2O2'][idx_zero:] = odeint_out.T[0]
