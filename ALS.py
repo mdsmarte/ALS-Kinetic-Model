@@ -351,32 +351,43 @@ class KineticModel:
 			return None, None, None, None
 
 		# Determine range of data over which to generate bootstrap samples
-		idx_data = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])
-		M = sum(idx_data)	# Length of each bootstrap sample
+		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])
+		M = sum(idx_cost)	# Length of each bootstrap sample
 
+		df_dist_p = pd.DataFrame()
 		i = 0
 		N_success = 0
 		N_fail = 0
 
 		while i < N:
-			#clear_output(wait=True)
 			print('Current Iteration: {:d} of {:d}'.format(i+1, N))
+			#clear_output(wait=True)
 
-			# Randomly generate indices (with replacement) that will be used to create the bootstrap sample
+			# Randomly generate indices (with replacement)
 			idx_i = np.random.choice(M, M)
 
 			# Create the bootstrap sample
-			t_i = t[idx_data][idx_i]
+			t_i = t[idx_cost][idx_i]
 			df_data_i = df_data.copy()
 			for species in df_data_i.index:
-				df_data_i.at[species,'val'] = df_data_i.at[species,'val'][idx_data][idx_i]
-				df_data_i.at[species,'err'] = df_data_i.at[species,'err'][idx_data][idx_i]
+				df_data_i.at[species,'val'] = df_data_i.at[species,'val'][idx_cost][idx_i]
+				df_data_i.at[species,'err'] = df_data_i.at[species,'err'][idx_cost][idx_i]
 
 			# Fit the bootstrap sample
-			df_p_i, _, _, cost_i, mesg_i, ier_i = self.fit(t_i, tbin, df_data_i, df_model_params, df_ALS_params, 20.0, save_fn, **kwargs)
+			df_p_i, _, _, cost_i, mesg_i, ier_i = self.fit(t_i, tbin, df_data_i, df_model_params, df_ALS_params, quiet=True, **kwargs)
+			
+			#display(df_p_i)
+			#display(df_p_i['val'].T)
+			#df_dist_p.append(df_p_i['val'].T)
+
+			# Iteratively creating a dataframe row by row is fairly slow
+			# Better to generate a list of dictionaries and then create dataframe AFTER
+			# Or instead just make a list of pandas series?  The data from df_p_i will already be formatted as such
 
 			# Save the output as the function runs so it may be accessed during a simulation
 			i += 1
+
+		return df_dist_p
 
 	'''
 	def monte_carlo_params(self):
