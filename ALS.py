@@ -162,11 +162,11 @@ class KineticModel:
 			print('Optimized Cost Function Value = {:g}'.format(cost))
 			print()
 
-			print('Optimized Parameters and Standard Errors:')
+			print('Optimized Parameters and Estimated Standard Errors:')
 			display(df_p)
 			print()
 
-			print('Correlation Matrix:')
+			print('Estimated Correlation Matrix:')
 			display(df_corr_p)
 			print()
 
@@ -180,7 +180,7 @@ class KineticModel:
 				else:
 					df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick, save_fn, False)
+			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, save_fn=save_fn, print_cost=False)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
@@ -333,7 +333,7 @@ class KineticModel:
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 	
-	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N=1000, save_fn=None, **kwargs):
+	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, save_fn=None, **kwargs):
 		# If fit_pre_photo is False then only sample from t >= t0
 		# Do we still need to pass pre photo data if fit_pre_photo is False?
 		# Possibly, if we end up calculating any sensitivities using the pre photo data (ex: S_H2O2)
@@ -354,40 +354,91 @@ class KineticModel:
 		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])
 		M = sum(idx_cost)	# Length of each bootstrap sample
 
-		df_dist_p = pd.DataFrame()
-		i = 0
+		dist_p = []
 		N_success = 0
 		N_fail = 0
 
-		while i < N:
-			print('Current Iteration: {:d} of {:d}'.format(i+1, N))
-			#clear_output(wait=True)
+		while N_success < N:
+			print('Successful Iterations: {:d}'.format(N_success))
+			print('Failed Iterations: {:d}'.format(N_fail))
+			print()
+			print('Current Iteration: {:d}'.format(N_success+N_fail+1))
+			clear_output(wait=True)
 
 			# Randomly generate indices (with replacement)
-			idx_i = np.random.choice(M, M)
+			idx_b = np.random.choice(M, M)
 
 			# Create the bootstrap sample
-			t_i = t[idx_cost][idx_i]
-			df_data_i = df_data.copy()
-			for species in df_data_i.index:
-				df_data_i.at[species,'val'] = df_data_i.at[species,'val'][idx_cost][idx_i]
-				df_data_i.at[species,'err'] = df_data_i.at[species,'err'][idx_cost][idx_i]
+			t_b = t[idx_cost][idx_b]
+			df_data_b = df_data.copy()
+			for species in df_data_b.index:
+				df_data_b.at[species,'val'] = df_data_b.at[species,'val'][idx_cost][idx_b]
+				df_data_b.at[species,'err'] = df_data_b.at[species,'err'][idx_cost][idx_b]
 
 			# Fit the bootstrap sample
-			df_p_i, _, _, cost_i, mesg_i, ier_i = self.fit(t_i, tbin, df_data_i, df_model_params, df_ALS_params, quiet=True, **kwargs)
-			
-			#display(df_p_i)
-			#display(df_p_i['val'].T)
-			#df_dist_p.append(df_p_i['val'].T)
-
-			# Iteratively creating a dataframe row by row is fairly slow
-			# Better to generate a list of dictionaries and then create dataframe AFTER
-			# Or instead just make a list of pandas series?  The data from df_p_i will already be formatted as such
+			df_p_b, _, _, cost_b, mesg_b, ier_b = self.fit(t_b, tbin, df_data_b, df_model_params, df_ALS_params, quiet=True, **kwargs)
+			success = (ier_b in (1,2,3,4))
 
 			# Save the output as the function runs so it may be accessed during a simulation
-			i += 1
+			# Note: We use pd.DataFrame.to_csv because pd.Series.to_csv orients as column instead of row
+			if save_fn:
+				mesg_b_adj = mesg_b.replace('\n','').replace(',','') # Remove newlines and commas
+				row_save = pd.DataFrame(df_p_b['val'].append(pd.Series((cost_b,success,ier_b,mesg_b_adj), index=('cost','success','ier','mesg')))).T
+				if (N_success+N_fail) == 0:
+					# First iteration - create a new file containing first row and column headers
+					row_save.to_csv(save_fn, index=False)
+				else:
+					# Subsequent iterations - append row to file without headers
+					row_save.to_csv(save_fn, index=False, header=False, mode='a')
 
-		return df_dist_p
+			# If fit was successful, add results to df_dist_p for calculating statistics after loop is finished
+			if success:
+				dist_p.append(df_p_b['val'])
+				N_success +=1
+			else:
+				N_fail += 1
+
+		df_dist_p = pd.DataFrame(dist_p, index=pd.RangeIndex(len(dist_p)))
+
+		# Summary statistics
+		# The estimated standard error is the standard deviation of the bootstrap distribution 
+		df_p = pd.DataFrame([df_dist_p.mean(),df_dist_p.std()], index=('val','err')).T
+		df_cov_p = df_dist_p.cov()
+		df_corr_p = df_dist_p.corr()
+
+		# Display results
+		print('Bootstrap simulation completed.')
+		print('Successful Iterations: {:d}'.format(N_success))
+		print('Failed Iterations: {:d}'.format(N_fail))
+		print()
+		print('Returned variables and below summary include only successful iterations.')
+		if save_fn:
+			print('Results saved to file include all iterations.')
+		print()
+
+		print('Average Parameter Values and Estimated Standard Errors:')
+		display(df_p)
+		print()
+
+		print('Estimated Correlation Matrix:')
+		display(df_corr_p)
+		print()
+
+		print('Below plots and cost use the average parameter values:')
+
+		# Make plots
+		df_model_params_p = df_model_params.copy()
+		df_ALS_params_p = df_ALS_params.copy()
+
+		for param in df_p.index:
+			if param in df_model_params_p.index:
+				df_model_params_p.at[param,'val'] = df_p.at[param,'val']
+			else:
+				df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
+
+		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, print_cost=True)
+
+		return df_p, df_cov_p, df_corr_p
 
 	'''
 	def monte_carlo_params(self):
