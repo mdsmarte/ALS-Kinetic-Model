@@ -212,8 +212,8 @@ class KineticModel:
 		idx_model = [np.abs(t_model - t[_]).argmin() for _ in range(t.size)] # Array of positional indices, maps model axis --> data axis
 
 		# Set up the grid of subplots
-		nrows = round(nSpecies/3) if (nSpecies%3) == 0 else round((nSpecies//3)+1)
 		ncols = 3
+		nrows = (nSpecies//ncols) if (nSpecies%ncols) == 0 else (nSpecies//ncols)+1
 		dpi = 120
 
 		plt.rc('font', size=9)
@@ -291,8 +291,8 @@ class KineticModel:
 		nSpecies = len(species_names)
 
 		# Set up the grid of subplots
-		nrows = round(nSpecies/3) if (nSpecies%3) == 0 else round((nSpecies//3)+1)
 		ncols = 3
+		nrows = (nSpecies//ncols) if (nSpecies%ncols) == 0 else (nSpecies//ncols)+1
 		dpi = 120
 
 		plt.rc('font', size=9)
@@ -438,7 +438,7 @@ class KineticModel:
 
 		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, print_cost=True)
 
-		return df_p, df_cov_p, df_corr_p
+		return df_p, df_cov_p, df_corr_p, df_dist_p
 
 	'''
 	def monte_carlo_params(self):
