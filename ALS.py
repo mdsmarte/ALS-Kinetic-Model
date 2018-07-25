@@ -1,6 +1,6 @@
 # Author: Matthew Smarte
-# Version: 1.0.0
-# Date: 7/16/18
+# Version: 1.1.0
+# Date: 7/25/18
 
 # This code is designed to be imported and run inside a Jupyter notebook using an iPython kernel.
 
@@ -26,7 +26,7 @@ import matplotlib.gridspec as gridspec
 from IPython.display import display, clear_output
 
 # TODO:
-# Write bootstrap / monte_carlo_params functions
+# Write monte_carlo_params functions
 # Add checks to make sure the inputs from the user have the correct formatting, throw errors if they are not (ex: err can have no zeros)
 # Check plot_model and plot_data_model for more than 2 rows and generalize to look good for more than 6 species
 
@@ -334,14 +334,12 @@ class KineticModel:
 			df.to_csv(save_fn, index=False)
 	
 	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, save_fn=None, **kwargs):
-		# If fit_pre_photo is False then only sample from t >= t0
-		# Do we still need to pass pre photo data if fit_pre_photo is False?
-		# Possibly, if we end up calculating any sensitivities using the pre photo data (ex: S_H2O2)
-		# Otherwise it is not necessary
-		# For now, going to assume passing pre photo data will not be necessary
-
-		# Be sure to make a copy of the data frames when passing so they don't get overwritten
-		# Returns df_p, df_cov_p, df_corr_p, df_dist_p
+		'''
+		Performs a bootstrap simulation to estimate the covariance matrix of the fit parameters.
+		See ex_notebook_1.ipynb for API documentation.
+		'''
+		# If the fit method changes once the monte carlo method is created, then this method may also need to change.
+		# (calculating sensitivities of stable species using pre photo data and proper error handling)
 
 		# Check fit t0 / fit_pre_photo
 		if df_ALS_params.at['t0','fit'] and not self._fit_pre_photo:
