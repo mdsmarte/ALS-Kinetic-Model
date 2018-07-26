@@ -1,6 +1,6 @@
 # Author: Matthew Smarte
-# Version: 1.0.0
-# Date: 7/16/18
+# Version: 1.1.0
+# Date: 7/25/18
 
 # This code is designed to be imported and run inside a Jupyter notebook using an iPython kernel.
 
@@ -23,10 +23,10 @@ import pandas as pd
 from scipy.optimize import leastsq
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from IPython.display import display
+from IPython.display import display, clear_output
 
 # TODO:
-# Write bootstrap / monte_carlo_params functions
+# Write monte_carlo_params functions
 # Add checks to make sure the inputs from the user have the correct formatting, throw errors if they are not (ex: err can have no zeros)
 # Check plot_model and plot_data_model for more than 2 rows and generalize to look good for more than 6 species
 
@@ -47,7 +47,7 @@ class KineticModel:
 		self._apply_PG = apply_PG
 		self._t_PG = t_PG
 
-	def fit(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, **kwargs):
+	def fit(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, quiet=False, **kwargs):
 		'''
 		Method for fitting data and optimizing parameters.
 		See ex_notebook_1.ipynb for API documentation.
@@ -58,13 +58,18 @@ class KineticModel:
 			print('ERROR: Fit t0 is True but fit_pre_photo is False!')
 			print('If we are fitting t0, then we must also fit the pre-photolysis data.')
 			print('Otherwise, the cost function would be minimized by arbitrarily increasing t0.')
-
 			return None, None, None, None, None, None
 
 		# Determine start time, end time, and range of times over which to fit
-		t_start = t.min()
-		t_end = t.max()
-		idx_data = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])	# Boolean array
+		t_start = float(t.min())
+		t_end = float(t.max())
+		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val']) # Boolean array of indices to use in cost calculation
+
+		# Establish corrspondence between data and model time axes
+		# Each entry in t has an exact match to an entry in t_model
+		# We take the below approach (rather than ==) to prevent any problems with numerical roundoff
+		t_model = self._time_axis(t_start, t_end, tbin)
+		idx_model = [np.abs(t_model - t[_]).argmin() for _ in range(t.size)] # Array of positional indices, maps model axis --> data axis
 
 		# Organize fitted species data into data_val and data_err frames
 		# Columns of data_val and data_err are species and the rows correspond to times in t array
@@ -80,15 +85,7 @@ class KineticModel:
 		p_names = list(model_params_fit.index) + list(ALS_params_fit.index)
 		p0 = np.concatenate((model_params_fit['val'], ALS_params_fit['val']))
 
-		# Establish corrspondence between data and model time axes
-		# Each entry in t has an exact match to an entry in t_model
-		# If fit is being called directly, then t and t_model should match exactly and this is technically unnecessary
-		# However, if fit is called from bootstrap, we need to explicitly define the correspondence
-		# We take the below approach (rather than ==) to prevent any problems with numerical roundoff
-		t_model = self._time_axis(t_start, t_end, tbin)
-		idx_model = [np.abs(t_model - t[idx_data][_]).argmin() for _ in range(sum(idx_data))]	# Array of positional indices
-
-		# Define the cost function to be optimized
+		# Define the cost functio n to be optimized
 		def calc_cost(p):
 
 			# Organize parameter values used for the current iteration of the fit into dictionaries
@@ -100,26 +97,30 @@ class KineticModel:
 				ALS_params_p[param] = p[p_names.index(param)] if param in p_names else df_ALS_params.at[param,'val']
 
 			# Run the model - we only need the concentrations dataframe
-			c_model = self._model(t_start, t_end, tbin, model_params_p, ALS_params_p)[1]
+			_, c_model = self._model(t_start, t_end, tbin, model_params_p, ALS_params_p)
 
-			# Calculate the weighted residual array
+			# Calculate the weighted residual array across points included in the cost computation
 			res = []
 			for species in species_names:
-				# Remember: idx_data is a boolean array and idx_model is an array of positional indices
-				obs = data_val.loc[idx_data,species]
-				mod = ALS_params_p['S_'+species] * c_model.iloc[idx_model,c_model.columns.get_loc(species)]
+				obs = data_val[species]
+				mod = ALS_params_p['S_'+species]*c_model[species]
 
 				# We take the sqrt of the weight since leastsq will square the array later
-				species_res = np.sqrt(data_fit.at[species,'weight']) * (obs-mod).values
+				# Important to perform .values conversion to array BEFORE we subtract obs and mod (pandas subtracts Series by index agreement not position)
+				species_res = np.sqrt(data_fit.at[species,'weight']) * (obs.values - mod.values[idx_model])[idx_cost]
 
 				if self._err_weight:
-					err = data_err.loc[idx_data, species]
-					species_res = species_res / err.values
+					err = data_err[species]
+					species_res = species_res / err.values[idx_cost]
 
 				res.append(species_res)
 
 			# leastsq will square then sum all entries in the returned array, and minimize this cost value
 			return np.concatenate(res)
+
+		if not quiet:
+			print('Initial Cost Function Value: {:g}'.format((calc_cost(p0)**2).sum()))
+			print()
 
 		# Perform the fit
 		# NOTE: The backend of leastsq will automatically autoscale the fit parameters to the same order of magnitude if diag=None (default).
@@ -151,34 +152,35 @@ class KineticModel:
 		df_cov_p = pd.DataFrame(cov_p, index=p_names, columns=p_names)
 		df_corr_p = pd.DataFrame(corr_p, index=p_names, columns=p_names)
 
-		# Display results
-		print('Optimization terminated successfully.' if ier in (1,2,3,4) else 'Optimization FAILED.')
-		print('Exit Code = {:d}'.format(ier))
-		print('Exit Message = {}'.format(mesg))
-		print()
+		if not quiet:
+			# Display results
+			print('Optimization terminated successfully.' if ier in (1,2,3,4) else 'Optimization FAILED.')
+			print('Exit Code = {:d}'.format(ier))
+			print('Exit Message = {}'.format(mesg))
+			print()
 
-		print('Optimized Cost Function Value = {:g}'.format(cost))
-		print()
+			print('Optimized Cost Function Value = {:g}'.format(cost))
+			print()
 
-		print('Optimized Parameters and Standard Errors:')
-		display(df_p)
-		print()
+			print('Optimized Parameters and Estimated Standard Errors:')
+			display(df_p)
+			print()
 
-		print('Correlation Matrix:')
-		display(df_corr_p)
-		print()
+			print('Estimated Correlation Matrix:')
+			display(df_corr_p)
+			print()
 
-		# Plot the fits
-		df_model_params_p = df_model_params.copy()
-		df_ALS_params_p = df_ALS_params.copy()
+			# Plot the fits
+			df_model_params_p = df_model_params.copy()
+			df_ALS_params_p = df_ALS_params.copy()
 
-		for param in df_p.index:
-			if param in df_model_params_p.index:
-				df_model_params_p.at[param,'val'] = df_p.at[param,'val']
-			else:
-				df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
+			for param in df_p.index:
+				if param in df_model_params_p.index:
+					df_model_params_p.at[param,'val'] = df_p.at[param,'val']
+				else:
+					df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick, save_fn, False)
+			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, save_fn=save_fn, print_cost=False)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
@@ -191,8 +193,8 @@ class KineticModel:
 		'''
 
 		# Run the model
-		t_start = t.min()
-		t_end = t.max()
+		t_start = float(t.min())
+		t_end = float(t.max())
 		t_model, c_model = self._model(t_start, t_end, tbin, df_model_params['val'].to_dict(), df_ALS_params['val'].to_dict())
 
 		# Only plot the species for which fit=True
@@ -204,14 +206,14 @@ class KineticModel:
 		if self._err_weight:
 			data_err = pd.DataFrame(list(data_fit['err']), index=species_names).T
 
-		# Setup for cost computation
-		# t and t_model should match exactly
+		# Setup for residual and cost computations
 		cost = 0
-		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])	# Boolean array
+		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val']) # Boolean array of indices to use in cost calculation
+		idx_model = [np.abs(t_model - t[_]).argmin() for _ in range(t.size)] # Array of positional indices, maps model axis --> data axis
 
 		# Set up the grid of subplots
-		nrows = round(nSpecies/3) if (nSpecies%3) == 0 else round((nSpecies//3)+1)
 		ncols = 3
+		nrows = (nSpecies//ncols) if (nSpecies%ncols) == 0 else (nSpecies//ncols)+1
 		dpi = 120
 
 		plt.rc('font', size=9)
@@ -227,15 +229,17 @@ class KineticModel:
 		s_model = []
 		for i, species in enumerate(species_names):
 			obs = data_val[species]
-			mod = df_ALS_params.loc['S_'+species,'val']*c_model[species]
+			mod = df_ALS_params.at['S_'+species,'val']*c_model[species]
 			s_model.append(mod)
 
-			# Compute this species' contribution to the cost
-			cost_i = np.sqrt(data_fit.at[species,'weight']) * (obs-mod).values
+			# Compute this species' residual and cost contribution
+			# Important to perform .values conversion to array BEFORE we subtract obs and mod (pandas subtracts Series by index agreement not position)
+			res = obs.values - mod.values[idx_model]
+			cost_i = np.sqrt(data_fit.at[species,'weight']) * res[idx_cost]
 			if self._err_weight:
 				err = data_err[species]
-				cost_i = cost_i / err.values
-			cost += (cost_i[idx_cost]**2).sum()
+				cost_i = cost_i / err.values[idx_cost]
+			cost += (cost_i**2).sum()
 
 			j = i // 3	# Row index
 			k = i % 3	# Col index
@@ -244,10 +248,10 @@ class KineticModel:
 			ax0 = plt.subplot(gs_jk[0])	# Data & Fit
 			ax1 = plt.subplot(gs_jk[1])	# Data - Fit
 
-			ax0.plot(t, obs, 'o')				# Plot the data
-			ax0.plot(t_model, mod, linewidth=2)	# Plot the fit
-			ax1.plot(t, obs-mod, 'o')			# Plot residual
-			ax1.plot(t, np.zeros(t.shape))		# Plot zero residual line
+			ax0.plot(t, obs, 'o')						# Plot the data
+			ax0.plot(t_model, mod, linewidth=2)			# Plot the fit
+			ax1.plot(t, res, 'o')						# Plot residual
+			ax1.plot(t_model, np.zeros(t_model.shape))	# Plot zero residual line
 
 			# Manually set x-axis ticks
 			ax0.set_xticks(ticks)
@@ -287,8 +291,8 @@ class KineticModel:
 		nSpecies = len(species_names)
 
 		# Set up the grid of subplots
-		nrows = round(nSpecies/3) if (nSpecies%3) == 0 else round((nSpecies//3)+1)
 		ncols = 3
+		nrows = (nSpecies//ncols) if (nSpecies%ncols) == 0 else (nSpecies//ncols)+1
 		dpi = 120
 
 		plt.rc('font', size=9)
@@ -329,16 +333,112 @@ class KineticModel:
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 	
+	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, save_fn=None, **kwargs):
+		'''
+		Performs a bootstrap simulation to estimate the covariance matrix of the fit parameters.
+		See ex_notebook_1.ipynb for API documentation.
+		'''
+		# If the fit method changes once the monte carlo method is created, then this method may also need to change.
+		# (calculating sensitivities of stable species using pre photo data and proper error handling)
+
+		# Check fit t0 / fit_pre_photo
+		if df_ALS_params.at['t0','fit'] and not self._fit_pre_photo:
+			print('ERROR: Fit t0 is True but fit_pre_photo is False!')
+			print('If we are fitting t0, then we must also fit the pre-photolysis data.')
+			print('Otherwise, the cost function would be minimized by arbitrarily increasing t0.')
+			return None, None, None, None
+
+		# Determine range of data over which to generate bootstrap samples
+		idx_cost = np.full(t.shape, True) if self._fit_pre_photo else (t >= df_ALS_params.at['t0','val'])
+		M = sum(idx_cost)	# Length of each bootstrap sample
+
+		dist_p = []
+		N_success = 0
+		N_fail = 0
+
+		while N_success < N:
+			print('Successful Iterations: {:d}'.format(N_success))
+			print('Failed Iterations: {:d}'.format(N_fail))
+			print()
+			print('Current Iteration: {:d}'.format(N_success+N_fail+1))
+			clear_output(wait=True)
+
+			# Randomly generate indices (with replacement)
+			idx_b = np.random.choice(M, M)
+
+			# Create the bootstrap sample
+			t_b = t[idx_cost][idx_b]
+			df_data_b = df_data.copy()
+			for species in df_data_b.index:
+				df_data_b.at[species,'val'] = df_data_b.at[species,'val'][idx_cost][idx_b]
+				df_data_b.at[species,'err'] = df_data_b.at[species,'err'][idx_cost][idx_b]
+
+			# Fit the bootstrap sample
+			df_p_b, _, _, cost_b, mesg_b, ier_b = self.fit(t_b, tbin, df_data_b, df_model_params, df_ALS_params, quiet=True, **kwargs)
+			success = (ier_b in (1,2,3,4))
+
+			# Save the output as the function runs so it may be accessed during a simulation
+			# Note: We use pd.DataFrame.to_csv because pd.Series.to_csv orients as column instead of row
+			if save_fn:
+				mesg_b_adj = mesg_b.replace('\n','').replace(',','') # Remove newlines and commas
+				row_save = pd.DataFrame(df_p_b['val'].append(pd.Series((cost_b,success,ier_b,mesg_b_adj), index=('cost','success','ier','mesg')))).T
+				if (N_success+N_fail) == 0:
+					# First iteration - create a new file containing first row and column headers
+					row_save.to_csv(save_fn, index=False)
+				else:
+					# Subsequent iterations - append row to file without headers
+					row_save.to_csv(save_fn, index=False, header=False, mode='a')
+
+			# If fit was successful, add results to df_dist_p for calculating statistics after loop is finished
+			if success:
+				dist_p.append(df_p_b['val'])
+				N_success +=1
+			else:
+				N_fail += 1
+
+		df_dist_p = pd.DataFrame(dist_p, index=pd.RangeIndex(len(dist_p)))
+
+		# Summary statistics
+		# The estimated standard error is the standard deviation of the bootstrap distribution 
+		df_p = pd.DataFrame([df_dist_p.mean(),df_dist_p.std()], index=('val','err')).T
+		df_cov_p = df_dist_p.cov()
+		df_corr_p = df_dist_p.corr()
+
+		# Display results
+		print('Bootstrap simulation completed.')
+		print('Successful Iterations: {:d}'.format(N_success))
+		print('Failed Iterations: {:d}'.format(N_fail))
+		print()
+		print('Returned variables and below summary include only successful iterations.')
+		if save_fn:
+			print('Results saved to file include all iterations.')
+		print()
+
+		print('Average Parameter Values and Estimated Standard Errors:')
+		display(df_p)
+		print()
+
+		print('Estimated Correlation Matrix:')
+		display(df_corr_p)
+		print()
+
+		print('Below plots and cost use the average parameter values:')
+
+		# Make plots
+		df_model_params_p = df_model_params.copy()
+		df_ALS_params_p = df_ALS_params.copy()
+
+		for param in df_p.index:
+			if param in df_model_params_p.index:
+				df_model_params_p.at[param,'val'] = df_p.at[param,'val']
+			else:
+				df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
+
+		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, print_cost=True)
+
+		return df_p, df_cov_p, df_corr_p, df_dist_p
+
 	'''
-	def bootstrap(self):
-		# If fit_pre_photo is False then only sample from t >= t0
-		# Do we still need to pass pre photo data if fit_pre_photo is False?
-		# Possibly, if we end up calculating any sensitivities from pre photo data (ex: S_H2O2)
-
-		# Be sure to make a copy of the data frames so it doesn't get overwritten
-
-		pass
-
 	def monte_carlo_params(self):
 		# Need to make sure parameters don't become nonphysical (e.g. negative rate constants) when simulating
 		# Be sure to make a copy of the params data frames so that they don't get overwritten
@@ -405,7 +505,7 @@ class KineticModel:
 		'''
 
 		# Create time axis for running the model (before applying tbin and t0)
-		t0 = ALS_params['t0']
+		t0 = float(ALS_params['t0'])
 		if t0 == 0:
 			t = self._time_axis(-20, t_end+((tbin-1)*self._dt), 1)
 		elif t0 < 0:
