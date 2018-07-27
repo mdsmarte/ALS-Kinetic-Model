@@ -217,6 +217,7 @@ class KineticModel:
 		dpi = 120
 
 		plt.rc('font', size=9)
+		plt.rc('axes.formatter', useoffset=False)
 		f = plt.figure(figsize=(1000/dpi,450*nrows/dpi), dpi=dpi)
 		gs = gridspec.GridSpec(nrows, ncols, figure=f, hspace=0.3, wspace=0.3, top=0.9)
 
@@ -296,6 +297,7 @@ class KineticModel:
 		dpi = 120
 
 		plt.rc('font', size=9)
+		plt.rc('axes.formatter', useoffset=False)
 		f = plt.figure(figsize=(1000/dpi,325*nrows/dpi), dpi=dpi)
 		gs = gridspec.GridSpec(nrows, ncols, figure=f, hspace=0.45, wspace=0.3, top=0.9, bottom=0.2)
 
