@@ -1,0 +1,28 @@
+k1 = model_params['k1']
+k2 = model_params['k2']
+k3 = model_params['k3']
+k_OH_wall = model_params['k_OH_wall']
+k_HO2_wall = model_params['k_HO2_wall']
+
+OH_0 = 
+H2O2_0 = 
+HO2_0 = 
+H2O_0 = 
+O2_0 = 
+y0 = np.array([OH, H2O2, HO2, H2O, O2])
+
+def calc_dy_dt(y, t_curr):
+	OH = y[0]
+	H2O2 = y[1]
+	HO2 = y[2]
+	H2O = y[3]
+	O2 = y[4]
+
+	dOH = -k1*OH*H2O2 -k2*OH*HO2 -k_OH_wall*OH
+	dH2O2 = -k1*OH*H2O2 +k3*HO2*HO2
+	dHO2 = +k1*OH*H2O2 -k2*OH*HO2 -k3*HO2*HO2 -k3*HO2*HO2 -k_HO2_wall*HO2
+	dH2O = +k1*OH*H2O2 +k2*OH*HO2
+	dO2 = +k2*OH*HO2 +k3*HO2*HO2
+
+	dy_dt = np.array([dOH, dH2O2, dHO2, dH2O, dO2])
+	return dy_dt
