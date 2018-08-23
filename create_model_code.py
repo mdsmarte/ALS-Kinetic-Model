@@ -121,7 +121,7 @@ def create_model_code(file_in, file_out, rxn_delim='==>'):
 		# Initial concentrations code (right side of equation still needs to be completed by user)
 		for species in species_names:
 			print(species + '_0 = ', file=f)
-		print('y0 = np.array([' + ', '.join(species_names) + '])', file=f)
+		print('y0 = np.array([' + '_0, '.join(species_names) + '_0])', file=f)
 		print(file=f)
 
 		# Function defining system of differential rate equations

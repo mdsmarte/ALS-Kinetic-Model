@@ -1,3 +1,7 @@
+# Three sections of the user model code can be generated automatically using create_model_code.py and
+# a model written in Kintecus format.  Comments below show the location of those three code blocks.
+# Most importantly, this includes the system of differential rate equations that may be tedious to type by hand.
+
 # Import modules
 import numpy as np
 from scipy.integrate import odeint
@@ -11,11 +15,16 @@ def model_H2O2_depletion(t, model_params):
 	# Any parameter that you would like to fit or include in a monte carlo uncertainty simulation must be defined in model_params
 	X0 = model_params['X0']					# Initial OH concentration (molc/cm3)
 	c_H2O2_0 = model_params['c_H2O2_0']		# Initial H2O2 concentration (molc/cm3)
-	k_OH_wall = model_params['k_OH_wall']	# OH wall loss rate (s-1)
-	k_HO2_wall = model_params['k_HO2_wall']	# HO2 wall loss rate (s-1)
+
+	# START (1/3): Below code block can be automatically generated - see create_model_code.py
+
 	k1 = model_params['k1']					# OH + H2O2 --> HO2 + H2O (cm3/molc/s)
 	k2 = model_params['k2']					# OH + HO2 --> H2O + O2 (cm3/molc/s)
 	k3 = model_params['k3']					# HO2 + HO2 --> H2O2 + O2 (cm3/molc/s)
+	k_OH_wall = model_params['k_OH_wall']	# OH wall loss rate (s-1)
+	k_HO2_wall = model_params['k_HO2_wall']	# HO2 wall loss rate (s-1)
+
+	# END (1/3): Above code block can be automatically generated - see create_model_code.py
 
 	# Need to define m and c dictionaries for any species you want the model to output.
 	# Any species for which you have data and want to perform a fit are required.
@@ -35,35 +44,45 @@ def model_H2O2_depletion(t, model_params):
 	c['OH']   = np.zeros(t.size)
 	c['HO2']  = np.zeros(t.size)
 
+	# START (2/3): Below code block can be automatically generated - see create_model_code.py
+	# (some manual input still required for the initial concentrations)
+
 	# Create the initial concentration (t = 0) array
 	# Need to do this for all species that have chemistry in the model, even if they aren't outputted
+	OH_0 = X0
 	H2O2_0 = c_H2O2_0 - X0/2
-	OH_0   = X0
-	HO2_0  = 0
-	H2O_0  = 0
-	O2_0   = 0
-	y0 = np.array([H2O2_0, OH_0, HO2_0, H2O_0, O2_0])
+	HO2_0 = 0
+	H2O_0 = 0
+	O2_0 = 0
+	y0 = np.array([OH_0, H2O2_0, HO2_0, H2O_0, O2_0])
+
+	# END (2/3): Above code block can be automatically generated - see create_model_code.py
+	# (some manual input still required for the initial concentrations)
+
+	# START (3/3): Below code block can be automatically generated - see create_model_code.py
 
 	# Define the kinetic model
 	def calc_dy_dt(y, t_curr):
 		# Positions of species in y correspond to the order of species in initial concentration array
 		# t_curr is not used since reaction rates depend only on concentrations
 
-		H2O2 = y[0]
-		OH   = y[1]
-		HO2  = y[2]
-		H2O  = y[3]
-		O2   = y[4]
+		OH = y[0]
+		H2O2 = y[1]
+		HO2 = y[2]
+		H2O = y[3]
+		O2 = y[4]
 
-		dH2O2 = -k1*OH*H2O2            +k3*HO2*HO2
-		dOH   = -k1*OH*H2O2 -k2*OH*HO2               -k_OH_wall*OH
-		dHO2  =  k1*OH*H2O2 -k2*OH*HO2 -2*k3*HO2*HO2 -k_HO2_wall*HO2
-		dH2O  =  k1*OH*H2O2 +k2*OH*HO2
-		dO2   =              k2*OH*HO2 +k3*HO2*HO2
+		dOH = -k1*OH*H2O2 -k2*OH*HO2 -k_OH_wall*OH
+		dH2O2 = -k1*OH*H2O2 +k3*HO2*HO2
+		dHO2 = +k1*OH*H2O2 -k2*OH*HO2 -k3*HO2*HO2 -k3*HO2*HO2 -k_HO2_wall*HO2
+		dH2O = +k1*OH*H2O2 +k2*OH*HO2
+		dO2 = +k2*OH*HO2 +k3*HO2*HO2
 
 		# Order of species must much the order in the initial concentrations array
-		dy_dt = np.array([dH2O2, dOH, dHO2, dH2O, dO2])
+		dy_dt = np.array([dOH, dH2O2, dHO2, dH2O, dO2])
 		return dy_dt
+
+	# END (3/3): Above code block can be automatically generated - see create_model_code.py
 
 	# If t[-1] < 0 (all times are pre-photolysis), then no need to integrate the model
 	# If t[-1] >= 0 (some times are post-photolysis), then we need to integrate the model and update the concentration arrays
@@ -76,8 +95,8 @@ def model_H2O2_depletion(t, model_params):
 		odeint_out = odeint(calc_dy_dt, y0, t[idx_zero:]/1000)
 
 		# Update the concentration vector over t >= 0, positions correspond to order of species in initial concentration array
-		c['H2O2'][idx_zero:] = odeint_out.T[0]
-		c['OH'][idx_zero:]   = odeint_out.T[1]
+		c['OH'][idx_zero:]   = odeint_out.T[0]
+		c['H2O2'][idx_zero:] = odeint_out.T[1]
 		c['HO2'][idx_zero:]  = odeint_out.T[2]
 
 	return m, c

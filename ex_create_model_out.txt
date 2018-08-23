@@ -9,7 +9,7 @@ H2O2_0 =
 HO2_0 = 
 H2O_0 = 
 O2_0 = 
-y0 = np.array([OH, H2O2, HO2, H2O, O2])
+y0 = np.array([OH_0, H2O2_0, HO2_0, H2O_0, O2_0])
 
 def calc_dy_dt(y, t_curr):
 	OH = y[0]
