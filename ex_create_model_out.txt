@@ -1,3 +1,5 @@
+# Code blocks for user model function:
+
 k1 = model_params['k1']
 k2 = model_params['k2']
 k3 = model_params['k3']
@@ -26,3 +28,23 @@ def calc_dy_dt(y, t_curr):
 
 	dy_dt = np.array([dOH, dH2O2, dHO2, dH2O, dO2])
 	return dy_dt
+
+# Code blocks for Jupyter notebook (model parameters setup):
+
+k1 = 1.80000E-12
+k2 = 1.11066E-10
+k3 = 1.44922E-12
+k_OH_wall = 15
+k_HO2_wall = 4
+
+k1_err = 2.70000E-13
+k2_err = 1.66599E-11
+k3_err = 2.10859E-13
+k_OH_wall_err = 0
+k_HO2_wall_err = 0
+
+df_model_params['k1'] = {'val':k1, 'err':k1_err, 'fit':False}
+df_model_params['k2'] = {'val':k2, 'err':k2_err, 'fit':False}
+df_model_params['k3'] = {'val':k3, 'err':k3_err, 'fit':False}
+df_model_params['k_OH_wall'] = {'val':k_OH_wall, 'err':k_OH_wall_err, 'fit':True}
+df_model_params['k_HO2_wall'] = {'val':k_HO2_wall, 'err':k_HO2_wall_err, 'fit':True}
