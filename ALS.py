@@ -181,11 +181,11 @@ class KineticModel:
 				else:
 					df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, save_fn=save_fn, print_cost=False)
+			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, conc_units=False, save_fn=save_fn, print_cost=False)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
-	def plot_data_model(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, print_cost=True):
+	def plot_data_model(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, conc_units=False, save_fn=None, print_cost=True):
 		'''
 		Method for plotting the scaled model overlaid on the inputted species data. (No fit is performed.)
 		Residuals are also plotted and the value of the cost function with these parameters is optionally outputted.
@@ -264,8 +264,8 @@ class KineticModel:
 			ax0.set_xticklabels([])						 # Hide x-axis tick labels for top plot
 			ax1.set_xlabel('Time (ms)')					 # Set x-axis label for bottom plot
 			if k == 0:									 # Set y-axis labels if plot is in first column
-				ax0.set_ylabel('Data & Fit')
-				ax1.set_ylabel('Data - Fit')
+				ax0.set_ylabel('Data & Model')
+				ax1.set_ylabel('Data - Model')
 
 		plt.show()
 
@@ -276,7 +276,9 @@ class KineticModel:
 
 		# Save the scaled model traces
 		if save_fn:
-			df = pd.DataFrame(s_model).T
+			df_data_out = data_val.rename(columns=(lambda _ : _ + '-data'))
+			df_model_out = pd.DataFrame(s_model).T.rename(columns=(lambda _ : _ + '-model'))
+			df = pd.concat((df_data_out,df_model_out), axis='columns')
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 
@@ -437,7 +439,7 @@ class KineticModel:
 			else:
 				df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, print_cost=True)
+		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, conc_units=False, save_fn=None, print_cost=True)
 
 		return df_p, df_cov_p, df_corr_p, df_dist_p
 

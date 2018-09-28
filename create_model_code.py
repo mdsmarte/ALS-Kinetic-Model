@@ -23,7 +23,7 @@ See 'ex_create_model_in.csv' for an example of the input file formatting and 'ex
 for an example of the output file.  The example corresponds to the running H2O2 photolysis example
 described in 'ex_notebook_1.ipynb'.
 
-The input file should be a two column comma-separated values (csv) file.  Each row represents
+The input file should be a five column comma-separated values (csv) file.  Each row represents
 a different reaction.
 	Column 1: contains a string that represents the rate constant.
 	Column 2: contains a string that represents the reaction in A+B==>C format.
