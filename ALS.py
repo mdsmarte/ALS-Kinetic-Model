@@ -1,12 +1,12 @@
 # ALS.py
 # Author: Matthew Smarte
-# Version: 1.1.0
-# Date: 7/25/18
+# Version: 1.1.1
+# Last Updated: 10/4/18
 
 # This code is designed to be imported and run inside a Jupyter notebook using an iPython kernel.
 
 '''
-DEPENDENCIES
+ALS.py DEPENDENCIES
 
 This code was developed and tested using the following packages/versions.
 Other versions may also work.
@@ -17,7 +17,18 @@ pandas 		0.20.1
 scipy 		0.19.0
 matplotlib 	2.2.2
 ipython 	5.3.0
+
+ALS.py MAJOR UPDATE HISTORY
+
+1.0.0 - 07/10/18 - Initial release (__init__, fit, plot_data_model, plot_model, _time_axis, _model, and _conv_IRF methods).
+1.1.0 - 07/25/18 - Added bootstrap method.
+1.1.1 - 10/04/18 - Added conc_units kwarg for fit, plot_data_model, and boostrap methods.
 '''
+
+# TODO:
+# Write monte_carlo_params functions
+# Add checks to make sure the inputs from the user have the correct formatting, throw errors if they are not (ex: err can have no zeros)
+# Check plot_model and plot_data_model for more than 2 rows and generalize to look good for more than 6 species
 
 import numpy as np
 import pandas as pd
@@ -25,11 +36,6 @@ from scipy.optimize import leastsq
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from IPython.display import display, clear_output
-
-# TODO:
-# Write monte_carlo_params functions
-# Add checks to make sure the inputs from the user have the correct formatting, throw errors if they are not (ex: err can have no zeros)
-# Check plot_model and plot_data_model for more than 2 rows and generalize to look good for more than 6 species
 
 class KineticModel:
 
@@ -48,7 +54,7 @@ class KineticModel:
 		self._apply_PG = apply_PG
 		self._t_PG = t_PG
 
-	def fit(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None, quiet=False, **kwargs):
+	def fit(self, t, tbin, df_data, df_model_params, df_ALS_params, delta_xtick=20.0, conc_units=False, save_fn=None, quiet=False, **kwargs):
 		'''
 		Method for fitting data and optimizing parameters.
 		See ex_notebook_1.ipynb for API documentation.
@@ -181,7 +187,7 @@ class KineticModel:
 				else:
 					df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, conc_units=False, save_fn=save_fn, print_cost=False)
+			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, conc_units=conc_units, save_fn=save_fn, print_cost=False)
 
 		return df_p, df_cov_p, df_corr_p, cost, mesg, ier
 
@@ -228,12 +234,17 @@ class KineticModel:
 		ticks = np.linspace(tick_low, tick_high, num=round(((tick_high-tick_low)/delta_xtick)+1), endpoint=True)
 
 		# Make the subplots
+		c_data = []
 		s_model = []
 		for i, species in enumerate(species_names):
 			obs = data_val[species]
 			mod = df_ALS_params.at['S_'+species,'val']*c_model[species]
 			s_model.append(mod)
 
+			c_obs = data_val[species]/df_ALS_params.at['S_'+species,'val']
+			c_mod = c_model[species]
+			c_data.append(c_obs)
+			
 			# Compute this species' residual and cost contribution
 			# Important to perform .values conversion to array BEFORE we subtract obs and mod (pandas subtracts Series by index agreement not position)
 			res = obs.values - mod.values[idx_model]
@@ -243,16 +254,30 @@ class KineticModel:
 				cost_i = cost_i / err.values[idx_cost]
 			cost += (cost_i**2).sum()
 
+			c_res = c_obs.values - c_mod.values[idx_model]
+
 			j = i // 3	# Row index
 			k = i % 3	# Col index
 
 			gs_jk = gridspec.GridSpecFromSubplotSpec(2, 1, hspace=0, height_ratios=[3,1], subplot_spec=gs[j,k])
-			ax0 = plt.subplot(gs_jk[0])	# Data & Fit
-			ax1 = plt.subplot(gs_jk[1])	# Data - Fit
+			ax0 = plt.subplot(gs_jk[0])	# Data & Model
+			ax1 = plt.subplot(gs_jk[1])	# Data - Model
 
-			ax0.plot(t, obs, 'o')						# Plot the data
-			ax0.plot(t_model, mod, linewidth=2)			# Plot the fit
-			ax1.plot(t, res, 'o')						# Plot residual
+			if conc_units:
+				ax0.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
+				ax0.plot(t, c_obs, 'o')					# Plot the data
+				ax0.plot(t_model, c_mod, linewidth=2)	# Plot the model
+
+				# OOM calculation adapted from matplotlib.ticker.ScalarFormatter._set_orderOfMagnitude source code
+				oom = np.floor(np.log10(ax0.get_yticks().max()))
+
+				ax1.ticklabel_format(axis='y', style='plain')
+				ax1.plot(t, c_res/(10**oom), 'o')		# Plot residual
+			else:
+				ax0.plot(t, obs, 'o')					# Plot the data
+				ax0.plot(t_model, mod, linewidth=2)		# Plot the model
+				ax1.plot(t, res, 'o')					# Plot residual
+
 			ax1.plot(t_model, np.zeros(t_model.shape))	# Plot zero residual line
 
 			# Manually set x-axis ticks
@@ -276,10 +301,20 @@ class KineticModel:
 
 		# Save the scaled model traces
 		if save_fn:
-			df_data_out = data_val.rename(columns=(lambda _ : _ + '-data'))
-			df_model_out = pd.DataFrame(s_model).T.rename(columns=(lambda _ : _ + '-model'))
+			append_data = (lambda _ : _ + '-data')
+			append_model = (lambda _ : _ + '-model')
+
+			if conc_units:
+				df_data_out = pd.DataFrame(c_data).T.rename(columns=append_data)
+				df_model_out = c_model.rename(columns=append_model) 
+			else:
+				df_data_out = data_val.rename(columns=append_data)
+				df_model_out = pd.DataFrame(s_model).T.rename(columns=append_model)
+
+			df_data_out.insert(0,'t-data',t)
+			df_model_out.insert(0,'t-model',t_model)
+
 			df = pd.concat((df_data_out,df_model_out), axis='columns')
-			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 
 	def plot_model(self, t_start, t_end, tbin, df_model_params, df_ALS_params, delta_xtick=20.0, save_fn=None):
@@ -319,6 +354,7 @@ class KineticModel:
 			k = i % 3	# Col index
 
 			ax = plt.subplot(gs[j,k])
+			ax.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
 			ax.plot(t_model, mod, linewidth=2)
 
 			# Manually set x-axis ticks
@@ -338,7 +374,7 @@ class KineticModel:
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 	
-	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, save_fn=None, **kwargs):
+	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, conc_units=False, save_fn=None, **kwargs):
 		'''
 		Performs a bootstrap simulation to estimate the covariance matrix of the fit parameters.
 		See ex_notebook_1.ipynb for API documentation.
@@ -439,7 +475,7 @@ class KineticModel:
 			else:
 				df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, conc_units=False, save_fn=None, print_cost=True)
+		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, conc_units=conc_units, save_fn=None, print_cost=True)
 
 		return df_p, df_cov_p, df_corr_p, df_dist_p
 
