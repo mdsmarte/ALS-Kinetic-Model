@@ -92,7 +92,7 @@ class KineticModel:
 		p_names = list(model_params_fit.index) + list(ALS_params_fit.index)
 		p0 = np.concatenate((model_params_fit['val'], ALS_params_fit['val']))
 
-		# Define the cost functio n to be optimized
+		# Define the cost function to be optimized
 		def calc_cost(p):
 
 			# Organize parameter values used for the current iteration of the fit into dictionaries
