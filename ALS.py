@@ -23,6 +23,7 @@ ALS.py MAJOR UPDATE HISTORY
 1.0.0 - 07/10/18 - Initial release (__init__, fit, plot_data_model, plot_model, _time_axis, _model, and _conv_IRF methods).
 1.1.0 - 07/25/18 - Added bootstrap method.
 1.1.1 - 10/04/18 - Added conc_units kwarg for fit, plot_data_model, and boostrap methods.
+1.1.2 - 01/09/19 - Added quiet kwarg to bootstrap method.
 '''
 
 # TODO:
@@ -374,7 +375,7 @@ class KineticModel:
 			df.insert(0,'t',t_model)
 			df.to_csv(save_fn, index=False)
 	
-	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, conc_units=False, save_fn=None, **kwargs):
+	def bootstrap(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, conc_units=False, save_fn=None, quiet=False, **kwargs):
 		'''
 		Performs a bootstrap simulation to estimate the covariance matrix of the fit parameters.
 		See ex_notebook_1.ipynb for API documentation.
@@ -398,11 +399,12 @@ class KineticModel:
 		N_fail = 0
 
 		while N_success < N:
-			print('Successful Iterations: {:d}'.format(N_success))
-			print('Failed Iterations: {:d}'.format(N_fail))
-			print()
-			print('Current Iteration: {:d}'.format(N_success+N_fail+1))
-			clear_output(wait=True)
+			if not quiet:
+				print('Successful Iterations: {:d}'.format(N_success))
+				print('Failed Iterations: {:d}'.format(N_fail))
+				print()
+				print('Current Iteration: {:d}'.format(N_success+N_fail+1))
+				clear_output(wait=True)
 
 			# Randomly generate indices (with replacement)
 			idx_b = np.random.choice(M, M)
@@ -445,37 +447,38 @@ class KineticModel:
 		df_cov_p = df_dist_p.cov()
 		df_corr_p = df_dist_p.corr()
 
-		# Display results
-		print('Bootstrap simulation completed.')
-		print('Successful Iterations: {:d}'.format(N_success))
-		print('Failed Iterations: {:d}'.format(N_fail))
-		print()
-		print('Returned variables and below summary include only successful iterations.')
-		if save_fn:
-			print('Results saved to file include all iterations.')
-		print()
+		if not quiet:
+			# Display results
+			print('Bootstrap simulation completed.')
+			print('Successful Iterations: {:d}'.format(N_success))
+			print('Failed Iterations: {:d}'.format(N_fail))
+			print()
+			print('Returned variables and below summary include only successful iterations.')
+			if save_fn:
+				print('Results saved to file include all iterations.')
+			print()
 
-		print('Average Parameter Values and Estimated Standard Errors:')
-		display(df_p)
-		print()
+			print('Average Parameter Values and Estimated Standard Errors:')
+			display(df_p)
+			print()
 
-		print('Estimated Correlation Matrix:')
-		display(df_corr_p)
-		print()
+			print('Estimated Correlation Matrix:')
+			display(df_corr_p)
+			print()
 
-		print('Below plots and cost use the average parameter values:')
+			print('Below plots and cost use the average parameter values:')
 
-		# Make plots
-		df_model_params_p = df_model_params.copy()
-		df_ALS_params_p = df_ALS_params.copy()
+			# Make plots
+			df_model_params_p = df_model_params.copy()
+			df_ALS_params_p = df_ALS_params.copy()
 
-		for param in df_p.index:
-			if param in df_model_params_p.index:
-				df_model_params_p.at[param,'val'] = df_p.at[param,'val']
-			else:
-				df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
+			for param in df_p.index:
+				if param in df_model_params_p.index:
+					df_model_params_p.at[param,'val'] = df_p.at[param,'val']
+				else:
+					df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
 
-		self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, conc_units=conc_units, save_fn=None, print_cost=True)
+			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, conc_units=conc_units, save_fn=None, print_cost=True)
 
 		return df_p, df_cov_p, df_corr_p, df_dist_p
 
