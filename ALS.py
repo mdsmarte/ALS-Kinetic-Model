@@ -27,9 +27,8 @@ ALS.py MAJOR UPDATE HISTORY
 '''
 
 # TODO:
-# Write monte_carlo_params functions
-# Add checks to make sure the inputs from the user have the correct formatting, throw errors if they are not (ex: err can have no zeros)
-# Check plot_model and plot_data_model for more than 2 rows and generalize to look good for more than 6 species
+# Add checks to make sure the inputs from the user have the correct formatting, throw errors if they are not (ex: df_data err field can have no zeros)
+# Adjust random sampling methodology of monte carlo parameter sampling to accomodate parameters with negative values and correlation between parameters 
 
 import numpy as np
 import pandas as pd
@@ -483,7 +482,6 @@ class KineticModel:
 
 		return df_p, df_cov_p, df_corr_p, df_dist_p
 
-	
 	def monte_carlo_params(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, conc_units=False, save_fn=None, quiet=False, **kwargs):
 		# Need to make sure parameters don't become nonphysical (e.g. negative rate constants) when simulating
 		# Be sure to make a copy of the params data frames so that they don't get overwritten
@@ -501,6 +499,17 @@ class KineticModel:
 		model_params_vary = df_model_params[(df_model_params['fit'] == False) & (df_model_params['err'] != 0)] 
 		ALS_params_vary = df_ALS_params[(df_ALS_params['fit'] == False) & (df_ALS_params['err'] != 0)]
 
+		# Parameter sampling is currently done using the truncated normal distribution:
+		# --- Lower bound of distribution (lb) is 0.
+		# --- Upper bound of distribution (ub) is 2 times the parameter value.
+		# --- Mean of distribution (mu) is the parameter value ('val' field).
+		# --- Standard deviation of distribution (sigma) is the parameter uncertainty ('err' field).
+		# See ex_notebook_1.ipynb for a discussion on the benefits / limitations of this approach.
+		# To sample from scipy.stats.truncnorm, use truncnorm.rvs((lb-mu)/sigma, (ub-mu)/sigma, mu, sigma).   
+		# For our choice of lb and ub, this reduces to the formula used below.
+		def sample(mu, sigma):
+			return truncnorm.rvs(-mu/sigma, mu/sigma, mu, sigma)
+
 		dist_p = []
 		N_success = 0
 		N_fail = 0
@@ -514,38 +523,30 @@ class KineticModel:
 				clear_output(wait=True)
 
 			# Create the monte carlo parameter sample
-			# Sampling is currently done using the truncated normal distribution:
-			# --- Lower bound of distribution (lb) is 0.
-			# --- Upper bound of distribution (ub) is 2 times the parameter value.
-			# --- Mean of distribution (mu) is the parameter value ('val' field).
-			# --- Standard deviation of distribution (sigma) is the parameter uncertainty ('err' field).
-			# See ex_notebook_1.ipynb for a discussion on the benefits / limitations of this approach.
-			# To sample from scipy.stats.truncnorm, use truncnorm.rvs((lb-mu)/sigma, (ub-mu)/sigma, mu, sigma).   
-			# For our choice of lb and ub, this reduces to the formula used below.
+			p_vary_vals = {}
+
 			df_model_params_mc = df_model_params.copy()
 			for p_row in model_params_vary.itertuples():
-				mu = p_row.val
-				sigma = p_row.err
-				df_model_params_mc.at[p_row.Index,'val'] = truncnorm.rvs(-mu/sigma, mu/sigma, mu, sigma)
-
+				df_model_params_mc.at[p_row.Index,'val'] = p_vary_vals[p_row.Index] = sample(p_row.val, p_row.err)
+				
 			df_ALS_params_mc = df_ALS_params.copy()
 			for p_row in ALS_params_vary.itertuples():
-				mu = p_row.val
-				sigma = p_row.err
-				df_ALS_params_mc.at[p_row.Index,'val'] = truncnorm.rvs(-mu/sigma, mu/sigma, mu, sigma)
+				df_ALS_params_mc.at[p_row.Index,'val'] = p_vary_vals[p_row.Index] = sample(p_row.val, p_row.err)
 			
 			# Perform fit using the parameter sample
 			df_p_mc, _, _, cost_mc, mesg_mc, ier_mc = self.fit(t, tbin, df_data, df_model_params_mc, df_ALS_params_mc, quiet=True, **kwargs)
 			success = (ier_mc in (1,2,3,4))
 
-
-			# EDIT SAVED OUTPUT TO INCLUDE MONTE CARLO PARAMETER SAMPLE VALUES
-
 			# Save the output as the function runs so it may be accessed during a simulation
 			# Note: We use pd.DataFrame.to_csv because pd.Series.to_csv orients as column instead of row
 			if save_fn:
 				mesg_mc_adj = mesg_mc.replace('\n','').replace(',','') # Remove newlines and commas
-				row_save = pd.DataFrame(df_p_mc['val'].append(pd.Series((cost_mc,success,ier_mc,mesg_mc_adj), index=('cost','success','ier','mesg')))).T
+
+				row_save = pd.Series(p_vary_vals) # Create Series with values of the randomly sampled parameters
+				row_save = row_save.append(pd.Series((cost_mc,success,ier_mc,mesg_mc_adj), index=('cost','success','ier','mesg'))) # Append fit result info
+				row_save = row_save.append(df_p_mc['val']) # Append fitted parameter values
+				row_save = pd.DataFrame(row_save).T # Convert to DataFrame for saving
+
 				if (N_success+N_fail) == 0:
 					# First iteration - create a new file containing first row and column headers
 					row_save.to_csv(save_fn, index=False)
@@ -563,10 +564,45 @@ class KineticModel:
 		df_dist_p = pd.DataFrame(dist_p, index=pd.RangeIndex(len(dist_p)))
 
 		# Summary statistics
-		# The estimated standard error is the standard deviation of the bootstrap distribution 
+		# The estimated standard error is the standard deviation of the monte carlo distribution
 		df_p = pd.DataFrame([df_dist_p.mean(),df_dist_p.std()], index=('val','err')).T
 		df_cov_p = df_dist_p.cov()
 		df_corr_p = df_dist_p.corr()
+
+		if not quiet:
+			# Display results
+			print('Monte carlo simulation completed.')
+			print('Successful Iterations: {:d}'.format(N_success))
+			print('Failed Iterations: {:d}'.format(N_fail))
+			print()
+			print('Returned variables and below summary include only successful iterations.')
+			if save_fn:
+				print('Results saved to file include all iterations.')
+			print()
+
+			print('Average Fitted Parameter Values and Estimated Standard Errors:')
+			display(df_p)
+			print()
+
+			print('Estimated Correlation Matrix:')
+			display(df_corr_p)
+			print()
+
+			print('Below plots and cost use the average parameter values:')
+
+			# Make plots
+			df_model_params_p = df_model_params.copy()
+			df_ALS_params_p = df_ALS_params.copy()
+
+			for param in df_p.index:
+				if param in df_model_params_p.index:
+					df_model_params_p.at[param,'val'] = df_p.at[param,'val']
+				else:
+					df_ALS_params_p.at[param,'val'] = df_p.at[param,'val']
+
+			self.plot_data_model(t, tbin, df_data, df_model_params_p, df_ALS_params_p, delta_xtick=delta_xtick, conc_units=conc_units, save_fn=None, print_cost=True)
+
+		return df_p, df_cov_p, df_corr_p, df_dist_p
 
 	def _time_axis(self, t_start, t_end, tbin):
 		'''
