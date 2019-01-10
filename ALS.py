@@ -34,6 +34,7 @@ ALS.py MAJOR UPDATE HISTORY
 import numpy as np
 import pandas as pd
 from scipy.optimize import leastsq
+from scipy.stats import truncnorm
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from IPython.display import display, clear_output
@@ -482,16 +483,90 @@ class KineticModel:
 
 		return df_p, df_cov_p, df_corr_p, df_dist_p
 
-	'''
-	def monte_carlo_params(self):
+	
+	def monte_carlo_params(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, conc_units=False, save_fn=None, quiet=False, **kwargs):
 		# Need to make sure parameters don't become nonphysical (e.g. negative rate constants) when simulating
 		# Be sure to make a copy of the params data frames so that they don't get overwritten
 		# When throwing our unrealistic parameters during Monte Carlo sampling, force the distributions to still be symmetric and renormalize
-
 		# Be sure to make a copy of the data frames so it doesn't get overwritten
 
-		pass
-	'''
+		# Check fit t0 / fit_pre_photo
+		if df_ALS_params.at['t0','fit'] and not self._fit_pre_photo:
+			print('ERROR: Fit t0 is True but fit_pre_photo is False!')
+			print('If we are fitting t0, then we must also fit the pre-photolysis data.')
+			print('Otherwise, the cost function would be minimized by arbitrarily increasing t0.')
+			return None, None, None, None
+
+		# Identify parameters to vary - fit field must be False and err field must be nonzero
+		model_params_vary = df_model_params[(df_model_params['fit'] == False) & (df_model_params['err'] != 0)] 
+		ALS_params_vary = df_ALS_params[(df_ALS_params['fit'] == False) & (df_ALS_params['err'] != 0)]
+
+		dist_p = []
+		N_success = 0
+		N_fail = 0
+
+		while N_success < N:
+			if not quiet:
+				print('Successful Iterations: {:d}'.format(N_success))
+				print('Failed Iterations: {:d}'.format(N_fail))
+				print()
+				print('Current Iteration: {:d}'.format(N_success+N_fail+1))
+				clear_output(wait=True)
+
+			# Create the monte carlo parameter sample
+			# Sampling is currently done using the truncated normal distribution:
+			# --- Lower bound of distribution (lb) is 0.
+			# --- Upper bound of distribution (ub) is 2 times the parameter value.
+			# --- Mean of distribution (mu) is the parameter value ('val' field).
+			# --- Standard deviation of distribution (sigma) is the parameter uncertainty ('err' field).
+			# See ex_notebook_1.ipynb for a discussion on the benefits / limitations of this approach.
+			# To sample from scipy.stats.truncnorm, use truncnorm.rvs((lb-mu)/sigma, (ub-mu)/sigma, mu, sigma).   
+			# For our choice of lb and ub, this reduces to the formula used below.
+			df_model_params_mc = df_model_params.copy()
+			for p_row in model_params_vary.itertuples():
+				mu = p_row.val
+				sigma = p_row.err
+				df_model_params_mc.at[p_row.Index,'val'] = truncnorm.rvs(-mu/sigma, mu/sigma, mu, sigma)
+
+			df_ALS_params_mc = df_ALS_params.copy()
+			for p_row in ALS_params_vary.itertuples():
+				mu = p_row.val
+				sigma = p_row.err
+				df_ALS_params_mc.at[p_row.Index,'val'] = truncnorm.rvs(-mu/sigma, mu/sigma, mu, sigma)
+			
+			# Perform fit using the parameter sample
+			df_p_mc, _, _, cost_mc, mesg_mc, ier_mc = self.fit(t, tbin, df_data, df_model_params_mc, df_ALS_params_mc, quiet=True, **kwargs)
+			success = (ier_mc in (1,2,3,4))
+
+
+			# EDIT SAVED OUTPUT TO INCLUDE MONTE CARLO PARAMETER SAMPLE VALUES
+
+			# Save the output as the function runs so it may be accessed during a simulation
+			# Note: We use pd.DataFrame.to_csv because pd.Series.to_csv orients as column instead of row
+			if save_fn:
+				mesg_mc_adj = mesg_mc.replace('\n','').replace(',','') # Remove newlines and commas
+				row_save = pd.DataFrame(df_p_mc['val'].append(pd.Series((cost_mc,success,ier_mc,mesg_mc_adj), index=('cost','success','ier','mesg')))).T
+				if (N_success+N_fail) == 0:
+					# First iteration - create a new file containing first row and column headers
+					row_save.to_csv(save_fn, index=False)
+				else:
+					# Subsequent iterations - append row to file without headers
+					row_save.to_csv(save_fn, index=False, header=False, mode='a')
+
+			# If fit was successful, add results to df_dist_p for calculating statistics after loop is finished
+			if success:
+				dist_p.append(df_p_mc['val'])
+				N_success +=1
+			else:
+				N_fail += 1
+
+		df_dist_p = pd.DataFrame(dist_p, index=pd.RangeIndex(len(dist_p)))
+
+		# Summary statistics
+		# The estimated standard error is the standard deviation of the bootstrap distribution 
+		df_p = pd.DataFrame([df_dist_p.mean(),df_dist_p.std()], index=('val','err')).T
+		df_cov_p = df_dist_p.cov()
+		df_corr_p = df_dist_p.corr()
 
 	def _time_axis(self, t_start, t_end, tbin):
 		'''
