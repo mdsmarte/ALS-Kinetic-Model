@@ -1,7 +1,7 @@
 # ALS.py
 # Author: Matthew Smarte
-# Version: 1.1.1
-# Last Updated: 10/4/18
+# Version: 1.2.0
+# Last Updated: 01/12/19
 
 # This code is designed to be imported and run inside a Jupyter notebook using an iPython kernel.
 
@@ -24,6 +24,7 @@ ALS.py MAJOR UPDATE HISTORY
 1.1.0 - 07/25/18 - Added bootstrap method.
 1.1.1 - 10/04/18 - Added conc_units kwarg for fit, plot_data_model, and boostrap methods.
 1.1.2 - 01/09/19 - Added quiet kwarg to bootstrap method.
+1.2.0 - 01/12/19 - Added preliminary monte_carlo_params method.
 '''
 
 # TODO:
@@ -380,8 +381,6 @@ class KineticModel:
 		Performs a bootstrap simulation to estimate the covariance matrix of the fit parameters.
 		See ex_notebook_1.ipynb for API documentation.
 		'''
-		# If the fit method changes once the monte carlo method is created, then this method may also need to change.
-		# (calculating sensitivities of stable species using pre photo data and proper error handling)
 
 		# Check fit t0 / fit_pre_photo
 		if df_ALS_params.at['t0','fit'] and not self._fit_pre_photo:
@@ -483,10 +482,15 @@ class KineticModel:
 		return df_p, df_cov_p, df_corr_p, df_dist_p
 
 	def monte_carlo_params(self, t, tbin, df_data, df_model_params, df_ALS_params, N, delta_xtick=20.0, conc_units=False, save_fn=None, quiet=False, **kwargs):
-		# Need to make sure parameters don't become nonphysical (e.g. negative rate constants) when simulating
-		# Be sure to make a copy of the params data frames so that they don't get overwritten
-		# When throwing our unrealistic parameters during Monte Carlo sampling, force the distributions to still be symmetric and renormalize
-		# Be sure to make a copy of the data frames so it doesn't get overwritten
+		'''
+		Performs a monte carlo simulation over fixed parameters to assess how their uncertainties propagate into uncertainties of the fitted parameters.
+		See ex_notebook_1.ipynb for API documentation.
+
+		The random sampling of the fitted parameters is preliminary (see below).  Future updates to this method should:
+		--- Allow fixed parameters for which negative values are physically meaningful to be included
+		--- Take into acccount possible correlation between fixed parameters
+		See full discussion of these issues in ex_notebook_1.ipynb. 
+		'''
 
 		# Check fit t0 / fit_pre_photo
 		if df_ALS_params.at['t0','fit'] and not self._fit_pre_photo:
